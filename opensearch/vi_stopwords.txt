@@ -1,0 +1,45 @@
+# search-fulltext-01-tim-kiem-co-ban.md §2.1 - stopword list for the `vi_stop`
+# token filter (vi_text/vi_text_folded/vi_text_shingle analyzers). Minimal
+# common Vietnamese function-word set for the MVP; can be tuned later without
+# a code change (this file only needs a container rebuild + reindex).
+là
+và
+của
+có
+cho
+trong
+đã
+được
+này
+đó
+với
+các
+những
+một
+để
+khi
+tại
+theo
+về
+như
+từ
+sau
+trước
+nếu
+thì
+mà
+nên
+vì
+do
+bởi
+hay
+hoặc
+nhưng
+cũng
+rất
+còn
+sẽ
+đang
+bị
+phải
+không

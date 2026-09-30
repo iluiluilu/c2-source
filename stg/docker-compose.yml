@@ -1,0 +1,310 @@
+# Stack chay tren server staging, dung sau nginx + Cloudflare (Cloudflare lo
+# SSL, origin chi noi HTTP thuan). Xem README.md de biet flow build/upload
+# image va cac buoc deploy.
+#
+#   cp .env.example .env   # roi dien gia tri that
+#   docker compose up -d
+#
+# web/backend KHONG build tai server: image duoc build local (`docker build`
+# o thu muc web/ va backend/ cua repo goc) roi upload len server (docker
+# save/load hoac push/pull qua registry) - xem README.md.
+
+# Gioi han log moi container toi da 50MB (5 file x 10MB, xoay vong) - mac
+# dinh Docker KHONG gioi han dung luong log, tung gay full disk 100% tren
+# server nay (backend log phinh toi 72GB do 1 scheduled job loi lien tuc,
+# lam Postgres FATAL "could not write init file" vi khong con cho ghi).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.0
+    restart: unless-stopped
+    logging: *default-logging
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HTTP_PORT: 8080
+      # KHONG bat KC_PROXY/KC_HOSTNAME_STRICT_HTTPS: origin khong co TLS
+      # (Cloudflare Flexible mode), nen `iss` phai la http:// de backend con
+      # goi lai duoc discovery/JWKS endpoint qua alias noi bo (xem
+      # KEYCLOAK_AUTH_SERVER_URL o service backend). Bat proxy trust se lam
+      # Keycloak doi `iss` sang https:// va lam login gay do lech issuer.
+    volumes:
+      - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ./config/keycloak/themes:/opt/keycloak/themes:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Khong publish port ra host: chi nginx (va cac container khac qua mang
+    # noi bo, xem alias AUTH_DOMAIN o service nginx) duoc goi toi keycloak.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      # Mo 0.0.0.0 vi co IP ngoai can connect truc tiep - Postgres la raw TCP
+      # nen KHONG di qua nginx/domain/Cloudflare duoc, bat buoc gioi han
+      # bang firewall (ufw allowlist IP) - xem README.md muc firewall.
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  seaweedfs:
+    # 3.97 co bug: identity S3 khong phai Admin (Read/List/Write rieng le,
+    # ke ca scope theo bucket vd "Read:documents") bi tu choi AccessDenied
+    # cho moi thao tac, du dung dung syntax - da xac minh bang test truc
+    # tiep (khong phai loi cau hinh). 4.44 (moi nhat da test) fix dung: Read
+    # rieng le hoat dong, List/Read scope theo bucket cung dung, tu choi
+    # dung bucket ngoai scope. Can ban nay de identity "external-ai" trong
+    # s3.json (chi Read+List bucket "documents") hoat dong duoc.
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    logging: *default-logging
+    command: server -ip.bind=0.0.0.0 -dir=/data -master.volumeSizeLimitMB=1024 -filer -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - seaweedfs_data:/data
+      - ./config/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      - 127.0.0.1:8333:8333
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: redis-server --save "" --appendonly no
+    ports:
+      - 127.0.0.1:6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav-debian:1.4
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./config/clamav/clamd.conf:/etc/clamav/clamd.conf
+
+  opensearch:
+    # Image custom, KHONG phai tag opensearchproject thuan: mapping cua 2 index
+    # segment-v1/document-v1 dung icu_tokenizer/icu_normalizer/icu_folding (plugin
+    # analysis-icu, base image khong co) va filter vi_stop doc
+    # config/analysis/vi_stopwords.txt. Thieu 1 trong 2 thi
+    # SearchIndexBootstrap tao index that bai am tham (no chi log ERROR roi cho app
+    # khoi dong tiep), va trieu chung duy nhat la SearchIndexOutboxPoller lap vo han
+    # voi 'no such index [segment]' - da dinh dung the tren stg 14/09 -> 18/09/2026.
+    # Giong het dev compose (opensearch), context nam trong stg/ de
+    # pack-and-upload.sh mang theo len server.
+    build:
+      context: ./opensearch
+      dockerfile: Dockerfile
+    image: aismartstore-opensearch:stg
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      # KHONG set plugins.security.disabled - de mac dinh (enabled). Image
+      # tu dung demo cert self-signed di kem khi security bat + co
+      # OPENSEARCH_INITIAL_ADMIN_PASSWORD, khong can cert/domain rieng (noi
+      # bo, client (backend, doi AI) deu trust-all/verify_certs=False).
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+    ports:
+      # Mo 0.0.0.0 vi co IP ngoai (doi AI) can connect truc tiep - REST API
+      # KHONG di qua nginx/domain/Cloudflare (chua co domain rieng cho
+      # OpenSearch), bat buoc gioi han bang firewall (iptables DOCKER-USER
+      # allowlist IP) - xem README.md muc firewall. Tu 2026-09-16 REST API
+      # la HTTPS (security plugin bat), khong con la HTTP thuan.
+      - 9200:9200
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      # -k: tu ky, khong co CA cong khai (xem comment tren). -u: security
+      # plugin bat thi request khong auth se 401 thay vi 200.
+      test: ["CMD-SHELL", "curl -sfk -u admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD} https://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      # Mo 0.0.0.0 vi co IP ngoai can connect truc tiep - REST (6333) va
+      # gRPC (6334) deu la raw TCP, KHONG di qua nginx/domain/Cloudflare
+      # duoc, bat buoc gioi han bang firewall (ufw allowlist IP) - xem
+      # README.md muc firewall.
+      - 6333:6333
+      - 6334:6334
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' 2>/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      # 5672 (AMQP) mo ra 0.0.0.0 vi co producer/consumer ben ngoai server
+      # can noi truc tiep - KHONG di qua domain/Cloudflare (AMQP la raw TCP,
+      # Cloudflare proxy thuong khong ho tro). Bat buoc gioi han bang
+      # firewall (allowlist IP cua ben can noi) - xem README.md muc firewall.
+      - 5672:5672
+      # 15672 (management UI) cung mo 0.0.0.0 - CHUNG tai khoan admin voi
+      # AMQP o tren, khong di qua nginx/Cloudflare nen khong co WAF/rate-limit
+      # bao ve dang nhap. Bat buoc firewall allowlist IP nhu 5672 - xem README.md.
+      - 15672:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    image: ${API_IMAGE}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      PORT: 3001
+      # http://AUTH_DOMAIN (khong co port) - phai khop tuyet doi voi issuer
+      # (`iss`) ma browser thay khi dang nhap qua nginx, xem nginx/conf.d/auth.conf.
+      KEYCLOAK_AUTH_SERVER_URL: http://${AUTH_DOMAIN}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PERSONAL_BUCKET: ${S3_PERSONAL_BUCKET}
+      S3_REGION: ${S3_REGION}
+      CLAMD_HOST: clamav
+      CLAMD_PORT: "3310"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MAX_UPLOAD_BYTES: "2147483648"
+      OPENSEARCH_HOST: opensearch
+      OPENSEARCH_PORT: "9200"
+      OPENSEARCH_SCHEME: https
+      OPENSEARCH_USERNAME: admin
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6334"
+      QDRANT_URL: http://qdrant:6333
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # digitization-pipeline-01-source-dispatch.md Task 0: spring.rabbitmq.*
+      # (application.yml) reads these discrete vars, not RABBITMQ_URL above -
+      # default host/port (localhost:5672) would be wrong inside this
+      # container's own network namespace.
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    # Khong publish port: chi nginx (proxy_pass toi backend:3001) duoc truy cap tu ngoai.
+
+  web:
+    image: ${WEB_IMAGE}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NEXTAUTH_URL: https://${WEB_DOMAIN}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      KEYCLOAK_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_ISSUER: http://${AUTH_DOMAIN}/realms/${KEYCLOAK_REALM}
+      # NEXT_PUBLIC_* da duoc "bake" vao build cua image (build arg khi
+      # `docker build`), khai bao lai o day khong doi duoc gia tri client-side
+      # - chi anh huong code server-side (route handlers) doc process.env truc tiep.
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://${AUTH_DOMAIN}/realms/${KEYCLOAK_REALM}
+      NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}
+    depends_on:
+      - backend
+    # Khong publish port: chi nginx (proxy_pass toi web:3000) duoc truy cap tu ngoai.
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - 80:80
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - web
+      - backend
+      - keycloak
+    networks:
+      default:
+        aliases:
+          # Backend/web goi Keycloak qua chinh domain cong khai (di vong qua
+          # nginx) de `iss` trong JWT luon khop voi URL ma browser da dung -
+          # KHONG tro alias nay thang vao service keycloak (se lech port/host
+          # so voi URL browser dung). Xem AUTH_DOMAIN trong .env.
+          - ${AUTH_DOMAIN}
+
+volumes:
+  postgres_data:
+  seaweedfs_data:
+  clamav_data:
+  opensearch_data:
+  qdrant_data:
+  rabbitmq_data:

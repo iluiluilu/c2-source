@@ -1,0 +1,261 @@
+# Stack for source_v2: Java/Spring backend + Next.js web + infrastructure.
+#
+# Infrastructure service configs (Keycloak realm/theme, postgres init, seaweedfs
+# s3.json, clamd.conf, opensearch image) live next to this file:
+# keycloak/, postgres/, seaweedfs/, clamav/, opensearch/.
+#
+#   docker compose up --build                                   # prod-like
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.0
+    # --import-realm loads realm files under /opt/keycloak/data/import on
+    # startup. It is a NO-OP if the realm already exists, so changes to
+    # realm-export.json only reach an existing environment after
+    # `docker compose down -v` (or a manual Admin Console change).
+    command: start-dev --import-realm
+    environment:
+      # Durable identity state lives in the shared Postgres (its own
+      # `keycloak` DB, created by postgres/init), not the embedded H2.
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - 8080:8080
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ./keycloak/themes:/opt/keycloak/themes:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # keycloak.localtest.me is public wildcard DNS -> 127.0.0.1. Aliasing it
+    # here makes containers and the host browser use the identical hostname,
+    # so Keycloak's per-request `iss` claim matches for both the OAuth login
+    # and backend token validation. Never split this back into
+    # localhost-vs-keycloak.
+    networks:
+      default:
+        aliases:
+          - keycloak.localtest.me
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aismartstore
+      POSTGRES_PASSWORD: aismartstore
+      POSTGRES_DB: aismartstore
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aismartstore -d aismartstore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  seaweedfs:
+    # Pinned; 3.9x is the first line with arm64 images (Apple Silicon dev).
+    image: chrislusf/seaweedfs:3.97
+    # -ip.bind=0.0.0.0: weed binds to the container IP by default, which
+    # breaks the localhost healthcheck below.
+    command: server -ip.bind=0.0.0.0 -dir=/data -master.volumeSizeLimitMB=1024 -filer -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - seaweedfs_data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      # Host-exposed for debugging only; backend talks over the compose network.
+      - 8333:8333
+    healthcheck:
+      # Master health != S3 ready; the backend's bucket retry on boot covers it.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Shared cache for admin-configurable parameters. One instance serves
+  # system-config.md (V7), account-lifecycle.md (V8) and data-ingestion.md
+  # (V10) - see the implementation-order table at the top of those specs.
+  # Cache only: Postgres remains the source of truth, so losing this
+  # container degrades performance, never correctness.
+  redis:
+    image: redis:7-alpine
+    # No persistence on purpose - everything here is rebuildable from
+    # Postgres, and an AOF/RDB file would just be stale state to reason about.
+    command: redis-server --save "" --appendonly no
+    ports:
+      # Host-exposed for debugging (redis-cli); backend talks over the network.
+      - 6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clamav:
+    # -debian variant: the Alpine-based clamav/clamav has no arm64 images.
+    image: clamav/clamav-debian:1.4
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./clamav/clamd.conf:/etc/clamav/clamd.conf
+    # Deliberately NOT in backend's depends_on: clamd takes minutes to load
+    # signatures, so the backend fails closed per request (upload -> 503)
+    # instead of blocking startup.
+
+  # Full-text search engine for FR-22/23/25 (ai-search-infra / search-fulltext).
+  # Custom image (not the bare opensearchproject/opensearch tag) - the base
+  # image ships no analysis plugins at all; search-fulltext.md Quyết định 1
+  # requires analysis-icu (icu_tokenizer/icu_normalizer/icu_folding) for the
+  # `segment`/`document` index mappings (search-fulltext-01-tim-kiem-co-ban.md
+  # Task 2), and the Vietnamese stopword list the mapping's `vi_stop` filter
+  # reads from config/analysis/vi_stopwords.txt.
+  opensearch:
+    build:
+      context: ./opensearch
+      dockerfile: Dockerfile
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      # Required by the security plugin's demo installer even when disabled
+      # (OpenSearch >= 2.12); dev-only value, override in production.
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Aismartstore1!
+    ports:
+      - 9200:9200
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # Vector database for FR-24 semantic search (ai-search-infra / search-semantic).
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - 6333:6333  # REST API
+      - 6334:6334  # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' 2>/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # Message broker for FR-17/19/20 digitization pipeline (ai-search-infra).
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: aismartstore
+      RABBITMQ_DEFAULT_PASS: aismartstore
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - 5672:5672    # AMQP
+      - 15672:15672  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3001
+      KEYCLOAK_AUTH_SERVER_URL: http://keycloak.localtest.me:8080
+      KEYCLOAK_REALM: aismartstore
+      KEYCLOAK_CLIENT_ID: backend
+      KEYCLOAK_SECRET: CvhRk2jci8Day7gmW3KFGWsZ05LmWqiq
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: aismartstore
+      DB_PASSWORD: aismartstore
+      DB_NAME: aismartstore
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY_ID: aismartstore
+      S3_SECRET_ACCESS_KEY: aismartstore_s3_secret
+      S3_BUCKET: documents
+      S3_PERSONAL_BUCKET: personal
+      S3_AUDIT_ARCHIVE_BUCKET: audit-archive
+      S3_REGION: us-east-1
+      CLAMD_HOST: clamav
+      CLAMD_PORT: "3310"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MAX_UPLOAD_BYTES: "2147483648"
+      OPENSEARCH_URL: http://opensearch:9200
+      # search-fulltext-01-tim-kiem-co-ban.md Task 1: spring.opensearch.*
+      # (app.opensearch.host/port, application.yml) reads these discrete
+      # vars, not OPENSEARCH_URL above - same pattern as RABBITMQ_URL vs
+      # RABBITMQ_HOST/RABBITMQ_PORT below.
+      OPENSEARCH_HOST: opensearch
+      OPENSEARCH_PORT: "9200"
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6334"
+      QDRANT_URL: http://qdrant:6333
+      RABBITMQ_URL: amqp://aismartstore:aismartstore@rabbitmq:5672/
+      # digitization-pipeline-01-source-dispatch.md Task 0: spring.rabbitmq.*
+      # (application.yml) reads these discrete vars, not RABBITMQ_URL above -
+      # default host/port (localhost:5672) would be wrong inside this
+      # container's own network namespace.
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+    ports:
+      - 3001:3001
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are inlined into the client bundle at build time, so
+        # they must be build args, not just runtime env.
+        NEXT_PUBLIC_KEYCLOAK_ISSUER: http://keycloak.localtest.me:8080/realms/aismartstore
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: a_very_secure_random_string_for_development
+      KEYCLOAK_ID: backend
+      KEYCLOAK_SECRET: CvhRk2jci8Day7gmW3KFGWsZ05LmWqiq
+      KEYCLOAK_ISSUER: http://keycloak.localtest.me:8080/realms/aismartstore
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://keycloak.localtest.me:8080/realms/aismartstore
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+    ports:
+      - 3000:3000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  seaweedfs_data:
+  clamav_data:
+  opensearch_data:
+  qdrant_data:
+  rabbitmq_data:

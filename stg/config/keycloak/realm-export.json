@@ -1,0 +1,158 @@
+{
+  "realm": "aismartstore",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "loginTheme": "aismartstore",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["vi"],
+  "defaultLocale": "vi",
+  "passwordPolicy": "length(8) and notUsername(undefined)",
+
+  "eventsEnabled": true,
+  "eventsExpiration": 604800,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "can-bo",
+        "description": "R1 - Can bo (officer): upload/import, OCR & STT review, search, notes, case files"
+      },
+      {
+        "name": "lanh-dao",
+        "description": "R2 - Lanh dao (leadership): read-only search, reports, case-file overview"
+      },
+      {
+        "name": "quan-tri",
+        "description": "R3 - Quan tri he thong (system admin): config, accounts, roles, logs, storage - no automatic access to business data (separation of duties, NFR-07)"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "backend",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "5wuN9q3hy1CQOyy45wuN9q3hy1CQOyy4",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "redirectUris": ["http://localhost:3000/*", "https://web.green0tech.site/*"],
+      "webOrigins": ["http://localhost:3000", "https://web.green0tech.site"],
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "canbo1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Can Bo",
+      "lastName": "Demo",
+      "email": "canbo1@example.local",
+      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+      "realmRoles": ["can-bo"]
+    },
+    {
+      "username": "canbo_lanhdao1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Can Bo",
+      "lastName": "Kiem Lanh Dao Demo",
+      "email": "canbo_lanhdao1@example.local",
+      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+      "realmRoles": ["can-bo", "lanh-dao"]
+    },
+    {
+      "username": "lanhdao1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Lanh Dao",
+      "lastName": "Demo",
+      "email": "lanhdao1@example.local",
+      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+      "realmRoles": ["lanh-dao"]
+    },
+    {
+      "username": "quantri1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Quan Tri",
+      "lastName": "Demo",
+      "email": "quantri1@example.local",
+      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+      "realmRoles": ["quan-tri"]
+    },
+    {
+      "username": "service-account-backend",
+      "enabled": true,
+      "serviceAccountClientId": "backend",
+      "clientRoles": {
+        "realm-management": [
+          "view-realm",
+          "view-users",
+          "manage-users",
+          "query-users",
+          "view-events"
+        ]
+      }
+    }
+  ],
+
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"
+          ]
+        }
+      }
+    ]
+  }
+}

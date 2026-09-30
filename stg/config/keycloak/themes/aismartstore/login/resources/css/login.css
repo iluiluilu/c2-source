@@ -1,0 +1,300 @@
+/*
+ * Keycloak login styled to match the AISmartStore web UI landing card
+ * (web/src/app/page.tsx). Palette:
+ *   #0B1527  page background (deep navy)
+ *   #0D2546  header / primary navy
+ *   #163a6b  primary navy hover
+ *   #D11A2A  accent red (bottom border + primary button)
+ */
+
+:root {
+  --navy-bg: #0B1527;
+  --navy: #0D2546;
+  --navy-hover: #163a6b;
+  --red: #D11A2A;
+  --red-hover: #b01523;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 1rem;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--navy-bg);
+  /* Grid overlay, mirrors the web landing page */
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #171717;
+}
+
+.kc-card {
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border-radius: 0.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Header ---- */
+.kc-card-header {
+  background: var(--navy);
+  color: #ffffff;
+  padding: 1.5rem;
+  border-bottom: 4px solid var(--red);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.kc-card-header .kc-logo {
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kc-card-header .kc-logo svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.kc-card-header .kc-title {
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.025em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+/* ---- Body ---- */
+.kc-card-body {
+  padding: 2rem 2rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+#kc-page-title {
+  color: var(--navy);
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.kc-subtitle {
+  color: #6b7280;
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0;
+}
+
+/* ---- Alerts (error / success / info) ---- */
+.kc-alert {
+  margin: 1.25rem 0 0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+}
+
+.kc-alert.alert-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.kc-alert.alert-success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.kc-alert.alert-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.kc-alert.alert-info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+
+/* ---- Form ---- */
+#kc-form {
+  margin-top: 2rem;
+}
+
+.kc-form-group {
+  margin-bottom: 1.25rem;
+}
+
+.kc-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.375rem;
+}
+
+.kc-input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  font-size: 1rem;
+  color: #171717;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.kc-input:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(13, 37, 70, 0.15);
+}
+
+.kc-input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.kc-input-error {
+  display: block;
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
+  color: var(--red);
+}
+
+/* Options row: remember-me + forgot password */
+.kc-form-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.kc-form-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #374151;
+  cursor: pointer;
+}
+
+.kc-form-options a {
+  color: var(--navy);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.kc-form-options a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Primary button ---- */
+.kc-btn-primary {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--red);
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.kc-btn-primary:hover {
+  background: var(--red-hover);
+}
+
+/* ---- Secondary button (e.g. "Hủy" on an app-initiated action) ---- */
+#kc-form-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.kc-btn-secondary {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--navy);
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.kc-btn-secondary:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+/* ---- Inline hint text above a form (e.g. forced password change) ---- */
+.kc-form-hint {
+  margin: 0 0 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+/* ---- Footer note ---- */
+.kc-footer-note {
+  margin-top: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: center;
+}
+
+.kc-footer-note .kc-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+/* Registration / info link block (inherited section) */
+#kc-info {
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+#kc-info a {
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: none;
+}

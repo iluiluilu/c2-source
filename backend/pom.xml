@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.aismartstore</groupId>
+  <artifactId>backend</artifactId>
+  <version>0.0.1</version>
+  <name>backend</name>
+  <description>AISmartStore backend (Spring Boot resource server)</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <!--
+      Override spring-boot-starter-parent 3.3.4's managed Testcontainers 1.19.8,
+      which pulls docker-java 3.3.6. That docker-java negotiates Docker Engine
+      API 1.32, and Docker Engine 29 dropped every API below 1.44 - so on any
+      up-to-date Docker host EVERY *IT class in this project dies before it
+      starts, with "Could not find a valid Docker environment ... client version
+      1.32 is too old. Minimum supported API version is 1.44". Hit for real on
+      the stg box (Engine 29.2.1) 2026-09-18.
+
+      Test scope only: Testcontainers never reaches the runtime classpath, so
+      this cannot change the shipped jar (verified by diffing
+      `mvn dependency:list -DincludeScope=runtime` before/after - identical).
+      1.21.4 is the newest 1.x; 2.x is a major release with breaking API
+      changes and is deliberately not taken here.
+    -->
+    <testcontainers.version>1.21.4</testcontainers.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <!--
+      Shared cache for admin-configurable parameters. Consumed by
+      docs/03-dev/specs/system-config.md (V7), account-lifecycle.md (V8,
+      account-status filter) and data-ingestion.md (V10, format allowlist) -
+      one Redis for all three, so it is added once here rather than by each.
+      Lettuce connects lazily, so having this on the classpath before any
+      code uses it does not affect startup.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
+    <!--
+      rbac-permission-editing.md Task 5: in-process TTL cache in front of
+      role_permission, read on every JWT authorities conversion
+      (SecurityConfig#realmRoleAuthorities) - a full cache abstraction/Redis
+      round trip is not needed for 3 roles x 15 permissions, so the Caffeine
+      Cache<K,V> API is used directly rather than Spring's @Cacheable.
+    -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!-- S3-compatible client for SeaweedFS -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <version>2.28.11</version>
+    </dependency>
+
+    <!--
+      digitization-pipeline-01-source-dispatch.md Task 0: RabbitMQ client for
+      DigitizationDispatchService/RabbitConfig. RabbitMQ itself already runs
+      in docker-compose.yml (service `rabbitmq`) - this only adds the Java
+      client, no new infra.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-amqp</artifactId>
+    </dependency>
+
+    <!--
+      search-fulltext-01-tim-kiem-co-ban.md Task 1: OpenSearch Java client for
+      POST /search (FR-22). OpenSearch itself already runs in
+      docker-compose.yml (service `opensearch`, 2.17.1) - this only adds the
+      Java client + its Apache HttpClient5 transport, no new infra. Version
+      pinned to the 2.17.x line to match the server (client/server major.minor
+      compatibility per OpenSearch's own support policy).
+    -->
+    <dependency>
+      <groupId>org.opensearch.client</groupId>
+      <artifactId>opensearch-java</artifactId>
+      <version>2.17.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+      <version>5.4</version>
+    </dependency>
+    <!--
+      spring-boot-starter-parent 3.3.4 pins httpcore5/httpcore5-h2 to 5.2.5 via
+      its own dependency management, older than what httpclient5:5.4 above
+      actually requires - without this override Maven resolves the
+      BOM-managed 5.2.5 instead, and OpenSearchClientConfig fails at runtime
+      with NoSuchMethodError on Tokenizer.delimiters(char,char,char) (added in
+      httpcore5 5.3). Pin to EXACTLY "5.3" (not a later 5.3.x patch, e.g.
+      5.3.6 - tried first, looked like the safe/obvious choice, but is
+      actually binary-incompatible in a different way: an OpenSearch call
+      that opens a fresh HTTP/2-capable connection throws NoSuchMethodError
+      on ClientH2UpgradeHandler's constructor, but on a background I/O
+      reactor thread rather than the caller's - so it never fails the
+      in-flight request's CompletableFuture, which then blocks forever
+      instead of erroring. This surfaced as OpenSearch calls hanging
+      indefinitely - genuinely unresponsive, not merely slow - most
+      reliably reproduced by bulk()/deleteByQuery()/updateByQuery() (see
+      SegmentIndexer), confirmed fixed by pinning to the *exact* version
+      ("5.3", via the httpcore.version property) httpclient5-parent:5.4
+      itself was built and tested against - not a later patch release,
+      despite normally being safe to take).
+    -->
+    <dependency>
+      <groupId>org.apache.httpcomponents.core5</groupId>
+      <artifactId>httpcore5</artifactId>
+      <version>5.3</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.httpcomponents.core5</groupId>
+      <artifactId>httpcore5-h2</artifactId>
+      <version>5.3</version>
+    </dependency>
+
+    <!--
+      digitization-review-05-frontend.md §3.1 (Task 1): rasterize a single PDF
+      page to PNG at 150 DPI for GET
+      /digitization-review/runs/{runId}/pages/{pageNo}/image (Story 2's
+      OcrPageViewer). Apache-2.0, pure-Java (no native pdftoppm/Ghostscript
+      dependency), so the runtime image (Dockerfile) needs no changes - it
+      ships inside backend.jar like every other dependency here.
+    -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>3.0.8</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <!--
+      delete-restore-trash-02-xoa-cung-xung-dot.md Task 1: distributed lock so
+      TrashPurgeJob/PurgeStuckRecoveryJob (the first @Scheduled jobs that must
+      never run concurrently across more than one backend instance - a
+      concurrent purge would double-process the same lô) only ever execute on
+      one instance at a time. shedlock-provider-jdbc-template reuses the
+      existing Postgres datasource - no new infra. Version pinned to a
+      release line already compatible with Spring 6.1/Boot 3.3 (jakarta
+      namespace).
+    -->
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-spring</artifactId>
+      <version>6.9.2</version>
+    </dependency>
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-jdbc-template</artifactId>
+      <version>6.9.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      Integration tests for system-config (docs/03-dev/specs/system-config.md
+      §5) need a real Postgres + Redis to exercise the DB-is-source-of-truth /
+      Redis-is-cache write path end to end - no equivalent pattern existed yet
+      in this project, so this is the first use. Versions come from
+      spring-boot-starter-parent's dependency management.
+    -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      search-fulltext-04-dong-bo-chi-muc.md §5: the indexer's own test plan
+      (poll-interval + update_by_query latency budgets) is written in terms
+      of Awaitility, matching how the SA/BA specs across this codebase
+      already describe async assertions. Version comes from
+      spring-boot-starter-parent's dependency management.
+    -->
+    <dependency>
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>backend</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+            </exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+      <!--
+        Before this, *IT.java classes (Testcontainers-based) had no standard
+        way to run at all: `mvn test`'s default Surefire include pattern
+        (**/*Test.java etc.) skips them, and there was no failsafe binding,
+        so every IT class needed a manual `-Dtest=ClassName` invocation.
+        `mvn verify` now runs them properly. reuseForks=false is deliberate:
+        several IT classes register their own @DynamicPropertySource-backed
+        Testcontainers (Postgres/Redis/RabbitMQ/OpenSearch) and, sharing one
+        JVM/Spring-context-cache across dozens of classes, calls into a
+        previous class's already-stopped container hang indefinitely instead
+        of failing fast - one fork per class avoids that entirely.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <reuseForks>false</reuseForks>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

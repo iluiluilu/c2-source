@@ -1,0 +1,24 @@
+{
+  "identities": [
+    {
+      "name": "backend",
+      "credentials": [
+        {
+          "accessKey": "aismartstore",
+          "secretKey": "5wuN9q3hy1CQOyy45wuN9q3hy1CQOyy4"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "external-ai",
+      "credentials": [
+        {
+          "accessKey": "ai-ef36d4311bdd4850",
+          "secretKey": "ai9ugWjymcp0WTGoJ8wu7EhktWj43sWjD3VdNXqG"
+        }
+      ],
+      "actions": ["Read:documents", "List:documents"]
+    }
+  ]
+}

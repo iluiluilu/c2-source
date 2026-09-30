@@ -1,0 +1,156 @@
+@startuml digitization-search-sequence
+title Luồng Upload → Số hoá → Xem/Duyệt → Embed/Index → Search\n(1 API Service + 1 AI Service - AI Service đảm nhận số hoá, embed, rerank, và xử lý search)
+
+skinparam sequenceMessageAlign center
+skinparam maxMessageSize 220
+skinparam BoxPadding 10
+autonumber
+
+actor "Người dùng" as User
+participant "API Service\n(Spring Boot)" as API
+queue "RabbitMQ\n(exchange ai.jobs)" as MQ
+participant "AI Service\n(số hoá OCR/STT/SED\n+ embed + rerank + search)" as AI
+database "Object Storage\n(SeaweedFS S3)" as S3
+database "PostgreSQL\n(nguồn sự thật)" as PG
+database "OpenSearch\n(document-v1 / segment-v1)" as OS
+database "Qdrant\n(segment-vec-v1)" as QD
+
+== 1. Upload tài liệu ==
+
+User -> API: POST /documents (file)
+activate API
+API -> S3: PUT object (storage_key)
+API -> PG: INSERT document\n(id, original_name, mime_type, size,\nsha256, storage_key, folder_id, status)
+API -> PG: INSERT digitization_source\n(component_type, file_path, mime_type,\ndispatchable, dispatch_status='pending')
+note right of PG
+  Cùng 1 transaction Postgres:
+  INSERT outbox_event
+  (event_type='document.ingested',
+   payload={documentId,...})
+end note
+API -> PG: INSERT outbox_event('document.ingested')
+API -> MQ: publish job (routing key q.ocr | q.stt | q.video\ntheo mime_type; DigitizationDispatchService)
+API --> User: 201 Created (document đã nạp kho,\nchờ xử lý số hoá)
+deactivate API
+
+note over API, OS
+  **Bất đồng bộ, song song với luồng chính:**
+  SearchIndexOutboxPoller (poll mỗi 2s) đọc outbox_event
+  'document.ingested' → upsert document + segment
+  content_source='title' vào OpenSearch ngay
+  (tài liệu tìm được theo TÊN dù OCR/STT chưa xong)
+end note
+API -> OS: (job nền) upsert document-v1 + segment title
+
+== 2. Số hoá (AI Service tiêu thụ hàng đợi) ==
+
+MQ -> AI: consume job (q.ocr/q.stt/q.sed/q.video)
+activate AI
+AI -> S3: GET source file (file_path)
+AI -> AI: chạy model offline (PaddleOCR/VietOCR,\nPhoWhisper STT, SED...) trên GPU nội bộ
+AI -> S3: PUT derived/<document_id>/<run_id>.json\n(raw_output_path)
+AI -> MQ: publish heartbeat định kỳ (q.heartbeat)
+MQ -> API: DigitizationHeartbeatConsumer
+API -> PG: UPDATE digitization_run.lease_expires_at
+AI -> MQ: publish kết quả (q.result) khi xong
+deactivate AI
+MQ -> API: DigitizationResultConsumer
+activate API
+API -> PG: UPDATE digitization_run\n(processing_status='succeeded', model_name/version,\nmetrics, raw_output_path, review_state='pending')
+API -> PG: INSERT content_segment[]\n(ai_text=current_text, page_no/bbox hoặc\ntime_start_ms/time_end_ms, confidence)
+API -> PG: UPSERT document_digitization_status\n(<task>_status='pending_review')
+deactivate API
+
+== 3. Người dùng xem & sửa (trước khi duyệt) ==
+
+User -> API: GET /review/runs/{runId}
+activate API
+API -> PG: SELECT digitization_run, content_segment\nWHERE run_id=...
+API -> S3: GET file gốc → render ảnh trang (PDFBox,\nkhông cache, mỗi request)
+API --> User: segment[] + ảnh trang/mốc thời gian
+deactivate API
+
+opt Cán bộ sửa nội dung OCR/STT
+  User -> API: PUT /review/segments/{id} (text mới)
+  activate API
+  API -> PG: INSERT segment_revision (revision_no, text, edited_by)
+  API -> PG: UPDATE content_segment\n(current_text, current_revision_no, is_edited=true)
+  API --> User: 200 OK
+  deactivate API
+end
+
+== 4. Duyệt (FR-18) ==
+
+User -> API: POST /review/runs/{runId}/confirm
+activate API
+note right of PG
+  Cùng 1 transaction:
+  - UPDATE digitization_run (review_state='confirmed',
+    confirm_source, confirmed_by/at)
+  - supersede run cũ cùng (document,task) nếu có
+  - UPSERT document_digitization_status(<task>_status='confirmed')
+  - INSERT outbox_event('review.confirmed',
+    {documentId, runId, task})
+  - INSERT audit_log('digitization_review.confirmed')
+end note
+API -> PG: transaction ở trên (atomic)
+API --> User: 200 OK
+deactivate API
+
+== 5. Đồng bộ chỉ mục toàn văn + Embed vector (bất đồng bộ) ==
+
+loop mỗi app.search-index.poll-interval-ms (mặc định 2000ms)
+  API -> PG: claim outbox_event chưa xử lý\n(event_type='review.confirmed'/'reconfirmed')
+  activate API
+  API -> PG: SELECT content_segment WHERE run_id=...\nAND NOT deleted
+  API -> OS: bulk upsert segment-v1 (text=current_text,\nvị trí, ACL scope_group_ids/owner_user_id)
+  API -> OS: upsert document-v1 (nếu chưa có)
+  API -> PG: UPDATE outbox_event.processed_at=now()\n(lỗi → giữ NULL, tăng attempts, retry)
+  deactivate API
+end
+
+note over AI, QD
+  **[Thiết kế search-semantic.md - Draft, chưa triển khai]**
+  Embed segment để phục vụ tìm kiếm ngữ nghĩa (FR-24)
+end note
+API -> AI: yêu cầu embed segment vừa duyệt\n(segment_id, current_text, model_version)
+activate AI
+AI -> AI: TEI embed (bge-m3, 1024 chiều, cosine)
+AI -> QD: upsert point(id=segment_id, vector,\npayload={document_id, owner_user_id,\nscope_group_ids, acl_version, model_version})
+AI --> API: ack
+deactivate AI
+
+== 6. Search ==
+
+User -> API: POST /search {query, filters, sort}
+activate API
+API -> API: dựng scopeCtx (groupIds(user) từ Redis,\nfail-closed nếu thiếu) + ScopeFilterBuilder
+
+alt Toàn văn (FR-22/23, đã triển khai)
+  API -> OS: lexicalSearch(query, filters+ACL,\nfrom/size, highlight)
+  OS --> API: hits (BM25 score, highlight offset)
+  API -> PG: hydrate (SELECT document/content_segment\nby segment_id) + double-check ACL (row-level)
+  API --> User: SearchResponse (results, totalApprox,\ndegraded_mode, refineSuggestions)
+
+else Ngữ nghĩa/Hybrid (FR-24, Draft - forward sang AI Service)
+  API -> AI: forward search request\n(query, filters, scopeCtx)
+  activate AI
+  AI -> AI: embed câu hỏi (TEI bge-m3)
+  par Truy vấn song song
+    AI -> OS: lexicalSearch(query, filters+ACL, top_k=50)
+    OS --> AI: 50 candidates (BM25)
+  else
+    AI -> QD: vector search(embedding,\nfilter pre-filter ACL+filters, top_k=50)
+    QD --> AI: 50 candidates (cosine)
+  end
+  AI -> AI: hợp nhất RRF (k=60) trên segment_id
+  AI -> AI: rerank top 20 (cross-encoder\nbge-reranker-v2-m3)
+  AI -> AI: lọc theo semantic.min_score (0.35 sau sigmoid)
+  AI --> API: ranked segment_id[] + rerank_score
+  deactivate AI
+  API -> PG: hydrate nội dung thật (current_text, vị trí,\nmetadata) + double-check ACL quyết định
+  API --> User: kết quả kèm dẫn nguồn (citation),\nhoặc "không đủ căn cứ" nếu rỗng sau lọc
+end
+deactivate API
+
+@enduml

@@ -1,0 +1,26 @@
+username,firstName,lastName,role,password,http_status
+van_an_nguyen,Van An,Nguyen,can-bo,MruK6DeP8pOTTgAa1!,200
+thi_binh_tran,Thi Binh,Tran,can-bo,DeWgLzOtQkOe4rAa1!,200
+minh_chau_le,Minh Chau,Le,can-bo,TestPass123Aa!,200
+thi_dung_pham,Thi Dung,Pham,can-bo,Oise1NaDlNfVkdAa1!,200
+van_duc_hoang,Van Duc,Hoang,can-bo,V3WhH9xfYwrDmzAa1!,200
+thi_hoa_huynh,Thi Hoa,Huynh,can-bo,DXfTGXjZQ3x073Aa1!,200
+minh_hai_phan,Minh Hai,Phan,can-bo,yFVOjd0s2qKWS0Aa1!,200
+thi_hanh_vu,Thi Hanh,Vu,can-bo,7UvJyAGOJx3HPIAa1!,200
+van_hung_vo,Van Hung,Vo,can-bo,JrZzCo5w1FaQTrAa1!,200
+thi_huyen_dang,Thi Huyen,Dang,can-bo,nBvvIe5MnOxHsDAa1!,200
+minh_khang_bui,Minh Khang,Bui,can-bo,4nQKU6ALWnlKpAa1!,200
+thi_lan_do,Thi Lan,Do,can-bo,kN8zbUaoKTfa5VAa1!,200
+van_long_ngo,Van Long,Ngo,can-bo,yLOChJf6DYj50iAa1!,200
+thi_mai_duong,Thi Mai,Duong,can-bo,DZYTyWNUAIJydXAa1!,200
+minh_nam_ly,Minh Nam,Ly,can-bo,CMWO52nweAgfxvAa1!,200
+thi_ngoc_nguyen,Thi Ngoc,Nguyen,can-bo,DdMGENmXCWizsKAa1!,200
+van_phuc_tran,Van Phuc,Tran,can-bo,fbco40xixGFJi6Aa1!,200
+thi_quynh_le,Thi Quynh,Le,can-bo,ccZ1UXTG3ScdlWAa1!,200
+minh_son_pham,Minh Son,Pham,can-bo,R6ba9kq8cYQr8PAa1!,200
+thi_thao_hoang,Thi Thao,Hoang,can-bo,YiJIlhxnHGpJViAa1!,200
+van_thang_huynh,Van Thang,Huynh,lanh-dao,GWXTXG8UqToipxAa1!,200
+thi_trang_phan,Thi Trang,Phan,lanh-dao,rghY7YfsoLDgrqAa1!,200
+minh_tuan_vu,Minh Tuan,Vu,lanh-dao,CNxgVNrg2boxTsAa1!,200
+thi_uyen_vo,Thi Uyen,Vo,lanh-dao,kjcIoU0S02rdcCAa1!,200
+van_viet_dang,Van Viet,Dang,lanh-dao,1HPDtDTe4iy8t1Aa1!,200

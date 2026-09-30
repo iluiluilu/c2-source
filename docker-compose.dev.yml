@@ -1,0 +1,73 @@
+# Development override.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# ALWAYS pass both files. A bare `docker compose up --build` rebuilds
+# backend/web from their PRODUCTION Dockerfiles but tags the images with the
+# same names, silently overwriting the dev images - the dev container then
+# runs its source-mounted command against an image that has no sources.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    environment:
+      PORT: 3001
+      KEYCLOAK_AUTH_SERVER_URL: http://keycloak.localtest.me:8080
+      KEYCLOAK_REALM: aismartstore
+      KEYCLOAK_CLIENT_ID: backend
+      KEYCLOAK_SECRET: CvhRk2jci8Day7gmW3KFGWsZ05LmWqiq
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: aismartstore
+      DB_PASSWORD: aismartstore
+      DB_NAME: aismartstore
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY_ID: aismartstore
+      S3_SECRET_ACCESS_KEY: aismartstore_s3_secret
+      S3_BUCKET: documents
+      S3_PERSONAL_BUCKET: personal
+      S3_AUDIT_ARCHIVE_BUCKET: audit-archive
+      S3_REGION: us-east-1
+      CLAMD_HOST: clamav
+      CLAMD_PORT: "3310"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MAX_UPLOAD_BYTES: "2147483648"
+    volumes:
+      # Source is mounted so edits land in the container. pom.xml is mounted
+      # too, but adding a dependency still needs `--build` (the image caches
+      # the resolved dependency tree).
+      - ./backend/src:/app/src
+      - ./backend/pom.xml:/app/pom.xml:ro
+      # Named volume for the Maven repo: without it every `up` re-downloads
+      # the whole dependency tree into a throwaway layer.
+      - maven_repo:/root/.m2
+    # No spring-boot-devtools in pom.xml, so this does not hot-reload.
+    # After editing sources:  docker compose ... restart backend
+    command: mvn -B spring-boot:run
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.dev
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: a_very_secure_random_string_for_development
+      KEYCLOAK_ID: backend
+      KEYCLOAK_SECRET: CvhRk2jci8Day7gmW3KFGWsZ05LmWqiq
+      KEYCLOAK_ISSUER: http://keycloak.localtest.me:8080/realms/aismartstore
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://keycloak.localtest.me:8080/realms/aismartstore
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      # Anonymous volumes shadow the host dirs so the image's installed
+      # node_modules and build cache survive the source mounts.
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+
+volumes:
+  maven_repo:

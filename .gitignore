@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+node_modules/
+target/
+.next/
+
+# web/ có repo git riêng
+/web/
+# thư mục tạm/cũ đưa ra ngoài
+/main-workspace/
+
+# cấu hình Claude theo máy
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# file môi trường
+.env

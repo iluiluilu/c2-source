@@ -1,0 +1,170 @@
+server:
+  port: ${PORT:3001}
+
+spring:
+  application:
+    name: backend
+
+  # search-fulltext-04-dong-bo-chi-muc.md muc 4.4.3: Spring Boot mac dinh pool
+  # size 1, tuc ca 18 job @Scheduled dung chung DUNG 1 thread - mot tick
+  # SearchIndexOutboxPoller cham (toi 200 vong, moi vong co the an tron
+  # RESPONSE_TIMEOUT_SECONDS=30 cua OpenSearchClientConfig) se lam tre toan bo
+  # cac job con lai. An toan dong thoi da tham dinh o muc 4.4.3: moi job claim
+  # viec deu dung FOR UPDATE SKIP LOCKED nguyen tu, khong job nao dua vao viec
+  # scheduler chi co 1 thread. Spring khong bao gio cho mot @Scheduled chong
+  # lan chinh no, bat ke pool size.
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:aismartstore}
+    username: ${DB_USER:aismartstore}
+    password: ${DB_PASSWORD:aismartstore}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  # Shared cache for admin-configurable parameters (system-config.md V7,
+  # account-lifecycle.md V8 status filter, data-ingestion.md V10 allowlist).
+  # Redis is a cache only - Postgres stays the source of truth, so a Redis
+  # outage degrades to a direct DB read rather than failing the request.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+      # We use Redis through StringRedisTemplate for plain key operations
+      # (sysconfig:{key}, ingest:allowlist, account:status:{sub}), never as a
+      # Spring Data repository store. Left enabled, the repository scanner
+      # inspects every JPA repository and logs a "could not identify store
+      # assignment" line for each one on every boot.
+      repositories:
+        enabled: false
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8080}/realms/${KEYCLOAK_REALM:aismartstore}
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${MAX_UPLOAD_BYTES_MB:2048MB}
+      max-request-size: ${MAX_UPLOAD_BYTES_MB:2048MB}
+
+  # digitization-pipeline-01-source-dispatch.md §4.6: RabbitMQ already runs in
+  # docker-compose.yml (service `rabbitmq`, same credentials as there).
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_DEFAULT_USER:aismartstore}
+    password: ${RABBITMQ_DEFAULT_PASS:aismartstore}
+    virtual-host: /
+
+app:
+  search-index:
+    # search-fulltext-04-dong-bo-chi-muc.md muc 4.2 (da co san, khai bao tuong
+    # minh o day de 3 tham so cua indexer nam canh nhau).
+    poll-interval-ms: ${SEARCH_INDEX_POLL_INTERVAL_MS:2000}
+    # Muc 4.4.1: qua nguong nay thi outbox_event bi "park" - giu nguyen
+    # processed_at IS NULL + last_error lam bang chung, nhung KHONG con duoc
+    # claim nua, de hang doi di tiep thay vi tac vinh vien sau mot row hong.
+    # Row bi park duoc dem + log ERROR boi SearchIndexReconciliationJob (muc
+    # 4.4.4) - khong co duong phat hien do thi day chi la mat du lieu im lang.
+    max-attempts: ${SEARCH_INDEX_MAX_ATTEMPTS:20}
+    # Muc 4.4.2: so segment toi da moi BulkRequest. Truoc day ca run di trong
+    # MOT bulk, khong gioi han, trong khi upload cho phep 2GB/file - du de
+    # vuot RESPONSE_TIMEOUT_SECONDS=30 (kha nang cao) hoac
+    # http.max_content_length=100mb (cuc doan). Con so 500 la [DX], chua do
+    # tren du lieu that - chinh bang bien moi truong, khong can build lai.
+    bulk-chunk-size: ${SEARCH_INDEX_BULK_CHUNK_SIZE:500}
+  keycloak:
+    auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8080}
+    realm: ${KEYCLOAK_REALM:aismartstore}
+    client-id: ${KEYCLOAK_CLIENT_ID:backend}
+    client-secret: ${KEYCLOAK_SECRET:}
+  storage:
+    s3-endpoint: ${S3_ENDPOINT:http://localhost:8333}
+    s3-region: ${S3_REGION:us-east-1}
+    s3-access-key-id: ${S3_ACCESS_KEY_ID:}
+    s3-secret-access-key: ${S3_SECRET_ACCESS_KEY:}
+    bucket: ${S3_BUCKET:documents}
+    personal-bucket: ${S3_PERSONAL_BUCKET:personal}
+    audit-archive-bucket: ${S3_AUDIT_ARCHIVE_BUCKET:audit-archive}
+  scanning:
+    clamd-host: ${CLAMD_HOST:localhost}
+    clamd-port: ${CLAMD_PORT:3310}
+    # data-ingestion.md Task 5b: was hard-coded in ClamdService; now tunable
+    # against ingest.max_file_size_bytes without a code change.
+    socket-timeout-ms: ${CLAMD_SOCKET_TIMEOUT_MS:120000}
+  upload:
+    max-bytes: ${MAX_UPLOAD_BYTES:2147483648}
+    # chunked-file-upload-03-session-cleanup.md: how often UploadCleanupJob
+    # scans upload_session for OPEN rows whose expires_at is in the past.
+    session-cleanup-interval-ms: ${UPLOAD_SESSION_CLEANUP_INTERVAL_MS:900000}
+  # app.personal.quota-bytes (PersonalProperties) removed by
+  # personal-storage-quota.md Task 6: the sole source of the personal
+  # storage quota is now account.storage_quota_bytes, read per-user via
+  # AccountsService.getOrCreateAccountRow - no more static, one-size-fits-
+  # all YAML quota.
+  digitization:
+    dispatch-retry-interval-ms: ${DIGITIZATION_DISPATCH_RETRY_INTERVAL_MS:60000}
+    dispatch-retry-batch-size: ${DIGITIZATION_DISPATCH_RETRY_BATCH_SIZE:100}
+    # digitization-results-store.md Task 6: TODO - giá trị tạm, chưa có
+    # ngưỡng chính thức (spec §7 rủi ro 4); phải sửa trước khi bật feature
+    # flag SED thật.
+    sed-promotion-threshold: ${DIGITIZATION_SED_PROMOTION_THRESHOLD:0.85}
+    # digitization-results-store.md Task 7: job đối soát document_digitization_status.
+    status-reconciliation-interval-ms: ${DIGITIZATION_STATUS_RECONCILIATION_INTERVAL_MS:300000}
+    status-reconciliation-batch-size: ${DIGITIZATION_STATUS_RECONCILIATION_BATCH_SIZE:200}
+    # digitization-pipeline-02-ocr-stt-processing.md Task 7: phát hiện job OCR/STT
+    # treo (lease hết hạn) - chu kỳ quét 60s + lease 90s (§4.4).
+    lease-check-interval-ms: ${DIGITIZATION_LEASE_CHECK_INTERVAL_MS:60000}
+    lease-check-batch-size: ${DIGITIZATION_LEASE_CHECK_BATCH_SIZE:100}
+    # digitization-pipeline-02-ocr-stt-processing.md Task 9: cảnh báo khi
+    # q.ocr.dlq/q.stt.dlq có message (§4.6).
+    dlq-alert-interval-ms: ${DIGITIZATION_DLQ_ALERT_INTERVAL_MS:300000}
+    # digitization-review-01-ocr.md §4 bước 5 (Story 5): AutoConfirmScheduler.
+    auto-confirm-interval-ms: ${DIGITIZATION_AUTO_CONFIRM_INTERVAL_MS:60000}
+    # digitization-review-01-ocr.md §4 bước 6 (Story 6): ReviewStaleAlertJob.
+    review-stale-check-interval-ms: ${DIGITIZATION_REVIEW_STALE_CHECK_INTERVAL_MS:300000}
+  queue:
+    ocr-name: ${QUEUE_OCR_NAME:q.ocr}
+    stt-name: ${QUEUE_STT_NAME:q.stt}
+    # digitization-pipeline-03-video-queue.md mục 0 điểm 1 (Quyết định 8).
+    video-name: ${QUEUE_VIDEO_NAME:q.video}
+  # search-fulltext-01-tim-kiem-co-ban.md Task 1: OpenSearch runs in
+  # docker-compose.yml (service `opensearch`); host/port (not a single URL)
+  # so OpenSearchClientConfig can build an ApacheHttpClient5 transport HttpHost
+  # the same way spring.rabbitmq.host/port coexist with RABBITMQ_URL above.
+  opensearch:
+    host: ${OPENSEARCH_HOST:localhost}
+    port: ${OPENSEARCH_PORT:9200}
+    # scheme/username/password default to http + blank (security plugin
+    # disabled) so environments that never set these three env vars keep
+    # working unchanged; set all of OPENSEARCH_SCHEME=https +
+    # OPENSEARCH_USERNAME/OPENSEARCH_PASSWORD together when the cluster has
+    # the security plugin enabled.
+    scheme: ${OPENSEARCH_SCHEME:http}
+    username: ${OPENSEARCH_USERNAME:}
+    password: ${OPENSEARCH_PASSWORD:}
+
+logging:
+  level:
+    root: INFO
+    com.aismartstore.backend: INFO

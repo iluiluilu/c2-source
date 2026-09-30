@@ -1,0 +1,39 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "1s",
+    "analysis": {
+      "filter": {
+        "vi_stop": {
+          "type": "stop",
+          "stopwords_path": "analysis/vi_stopwords.txt"
+        }
+      },
+      "analyzer": {
+        "vi_text": {
+          "type": "custom",
+          "char_filter": [],
+          "tokenizer": "icu_tokenizer",
+          "filter": ["icu_normalizer", "vi_stop"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "document_id": { "type": "keyword" },
+      "document_name": { "type": "text", "analyzer": "vi_text" },
+      "doc_type": { "type": "keyword" },
+      "topic_tags": { "type": "keyword" },
+      "folder_id": { "type": "keyword" },
+      "folder_path_ids": { "type": "keyword" },
+      "uploaded_at": { "type": "date" },
+      "media_type": { "type": "keyword" },
+      "owner_user_id": { "type": "keyword" },
+      "scope_group_ids": { "type": "keyword" },
+      "acl_version": { "type": "integer" },
+      "index_version": { "type": "long" }
+    }
+  }
+}

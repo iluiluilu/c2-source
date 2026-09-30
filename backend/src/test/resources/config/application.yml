@@ -1,0 +1,27 @@
+# Overrides src/main/resources/application.yml for every Spring Boot test context
+# (Spring Boot merges this on top of the main classpath:application.yml - test
+# classes/resources precede main on the test classpath, so this file's values win).
+#
+# [C2] flaky IT investigation (2026-09-20): `mvn verify` intermittently (~2/3 full
+# runs) failed exactly ONE IT class (a different one each time) with
+# FlywaySqlException wrapping a pgjdbc SSL-negotiation failure while connecting to
+# that class's own Testcontainers Postgres. `reuseForks=false` (pom.xml, kept -
+# deliberate, see its own comment there) already forks one JVM per IT class
+# sequentially (forkCount defaults to 1 - never multiple simultaneous forks/
+# containers), so this isn't N containers competing for CPU/memory at once; it's
+# the pgjdbc default `sslmode=prefer` doing an SSL handshake against a
+# `postgres:16-alpine` container that has SSL off, and that handshake occasionally
+# getting cut off (Docker daemon housekeeping - starting a new container while the
+# previous fork's Testcontainers/Ryuk cleanup is still finishing - stalls just
+# long enough on a loaded host). None of the 34 IT classes set sslmode explicitly.
+#
+# Fix: skip the SSL handshake entirely for every test connection - there is no
+# SSL to negotiate with these ephemeral local containers anyway, so this removes
+# the whole failure mode rather than papering over its timing. Scoped to `src/
+# test/resources` only - never packaged into the production jar, so `stg`/prod
+# Postgres connections (which may run SSL) are untouched.
+spring:
+  datasource:
+    hikari:
+      data-source-properties:
+        sslmode: disable

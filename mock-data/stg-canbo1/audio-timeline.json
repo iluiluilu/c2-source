@@ -1,0 +1,48 @@
+{
+  "doc-b": {
+    "duration_ms": 44180,
+    "segments": [
+      {
+        "i": 0,
+        "start_ms": 0,
+        "end_ms": 13050,
+        "text": "Kính thưa các đồng chí, hôm nay ngày mười lăm tháng chín năm hai nghìn không trăm hai mươi sáu, Phòng Hành chính Tổng hợp tổ chức họp giao ban tuần để đánh giá tiến độ công tác số hóa tài liệu lưu trữ."
+      },
+      {
+        "i": 1,
+        "start_ms": 13650,
+        "end_ms": 28813,
+        "text": "Về kết quả tuần vừa qua, chúng ta đã hoàn thành số hóa một nghìn hai trăm bốn mươi trang tài liệu, đạt chín mươi hai phần trăm kế hoạch tuần. Bộ phận kiểm duyệt đã xác nhận tám trăm sáu mươi trang, số còn lại đang chờ duyệt."
+      },
+      {
+        "i": 2,
+        "start_ms": 29413,
+        "end_ms": 44181,
+        "text": "Nhiệm vụ tuần tới, đề nghị các đồng chí tập trung xử lý khối hồ sơ tồn đọng của quý hai, đồng thời rà soát lại chất lượng nhận dạng đối với các tài liệu quét mờ. Cuộc họp kết thúc, xin cảm ơn các đồng chí."
+      }
+    ]
+  },
+  "doc-d": {
+    "duration_ms": 28158,
+    "segments": [
+      {
+        "i": 0,
+        "start_ms": 0,
+        "end_ms": 4899,
+        "text": "Xin chào anh, mời anh giới thiệu ngắn gọn về quá trình công tác của mình."
+      },
+      {
+        "i": 1,
+        "start_ms": 5499,
+        "end_ms": 17109,
+        "text": "Dạ vâng, tôi tốt nghiệp chuyên ngành công nghệ thông tin năm hai nghìn không trăm mười chín, sau đó làm việc bốn năm tại bộ phận quản trị hệ thống của một đơn vị hành chính công."
+      },
+      {
+        "i": 2,
+        "start_ms": 17709,
+        "end_ms": 28158,
+        "text": "Cảm ơn anh. Về vị trí cán bộ số hóa tài liệu, anh có kinh nghiệm gì với các hệ thống nhận dạng ký tự quang học và chuyển giọng nói thành văn bản không?"
+      }
+    ]
+  }
+}
