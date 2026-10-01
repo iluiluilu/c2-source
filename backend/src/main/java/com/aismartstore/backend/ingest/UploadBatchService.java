@@ -128,6 +128,11 @@ public class UploadBatchService {
     }
 
     @Transactional
+    public void release(UUID batchId, long fileSize) {
+        uploadBatchRepository.release(batchId, fileSize);
+    }
+
+    @Transactional
     public void incrementAccepted(UUID batchId) {
         uploadBatchRepository.incrementAccepted(batchId);
     }

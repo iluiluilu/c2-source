@@ -6,6 +6,9 @@ import com.aismartstore.backend.auth.KeycloakUser;
 import com.aismartstore.backend.common.ApiException;
 import com.aismartstore.backend.common.ForbiddenException;
 import com.aismartstore.backend.common.NotFoundException;
+import com.aismartstore.backend.common.SqlErrors;
+import com.aismartstore.backend.displayname.DisplayNameValidator;
+import com.aismartstore.backend.displayname.NameCheckRepository;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
 import com.aismartstore.backend.documents.DocumentSpecifications;
@@ -20,7 +23,6 @@ import com.aismartstore.backend.systemconfig.SystemConfigDefaults;
 import com.aismartstore.backend.systemconfig.SystemConfigService;
 import com.aismartstore.backend.warehouse.WarehouseService;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,6 +33,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -47,6 +50,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class TrashService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TrashService.class);
 
     /** ingest.max_files_per_batch's default (§4.1 step 1) - also the hard ceiling on every trash/restore batch here. */
     private static final int MAX_BATCH_SIZE = 500;
@@ -373,19 +378,32 @@ public class TrashService {
         }
         UUID effectiveFolderId = targetFolderId != null ? targetFolderId : document.getFolderId();
 
-        boolean nameConflictExists = documentRepository
-                .findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-                        effectiveFolderId, document.getRelativePath(), document.getOriginalName(), DocumentStatus.CLEAN)
-                .isPresent();
-        String restoredName = document.getOriginalName();
-        if (nameConflictExists) {
+        // SPEC-folder-upload-display-name BE-8: conflict is judged on display_name (case-insensitive,
+        // live rows of every status, same predicate as UQ_document_display_name_alive).
+        String oldName = document.getDisplayName();
+        String restoredDisplayName = oldName;
+        String restoredOriginalName = document.getOriginalName();
+        if (displayNameTaken(effectiveFolderId, document, oldName)) {
             if (!"AUTO_RENAME".equals(onNameConflict)) {
-                throw nameConflict(renamedName(document.getOriginalName()));
+                throw nameConflict(DisplayNameValidator.generateSuffixName(document.getOriginalName()));
             }
-            restoredName = renamedName(document.getOriginalName());
+            // "Đổi tên": suffix name (Java generator), up to 3 candidates; both names get the new value.
+            String candidate = null;
+            for (int attempt = 0; attempt < 3 && candidate == null; attempt++) {
+                String next = DisplayNameValidator.generateSuffixName(document.getOriginalName());
+                if (!displayNameTaken(effectiveFolderId, document, next)) {
+                    candidate = next;
+                }
+            }
+            if (candidate == null) {
+                throw nameConflict(DisplayNameValidator.generateSuffixName(document.getOriginalName()));
+            }
+            restoredDisplayName = candidate;
+            restoredOriginalName = candidate;
         }
 
-        document.setOriginalName(restoredName);
+        document.setOriginalName(restoredOriginalName);
+        document.setDisplayName(restoredDisplayName);
         document.setFolderId(effectiveFolderId);
         document.setDeletedAt(null);
         document.setDeletedBySub(null);
@@ -394,7 +412,16 @@ public class TrashService {
         document.setPurgeAfter(null);
         document.setPurgeState(PurgeState.ACTIVE);
         // trashBatchId intentionally kept (history, §4.3 step 4).
-        documentRepository.save(document);
+        try {
+            documentRepository.saveAndFlush(document);
+        } catch (DataIntegrityViolationException e) {
+            if (SqlErrors.isUniqueViolation(e)) {
+                // lost a race with a concurrent upload/restore into the same name
+                throw nameConflict(DisplayNameValidator.generateSuffixName(document.getOriginalName()));
+            }
+            throw e;
+        }
+        log.info("restore display_name renamed={} context=restore", !restoredDisplayName.equals(oldName));
 
         List<UUID> groupsLostEffect = documentGroupShareRepository.findDeletedGroupIdsForDocument(id);
 
@@ -413,9 +440,11 @@ public class TrashService {
                 auditRequestContext.ip(),
                 Map.of(
                         "restoredFolderId", document.getFolderId() != null ? document.getFolderId().toString() : "",
+                        "oldDisplayName", oldName,
+                        "newDisplayName", restoredDisplayName,
                         "groupsLostEffect", groupsLostEffect.stream().map(UUID::toString).toList())));
 
-        return new RestoreResult(document.getId(), document.getFolderId(), document.getOriginalName(), groupsLostEffect);
+        return new RestoreResult(document.getId(), document.getFolderId(), document.getDisplayName(), groupsLostEffect);
     }
 
     public List<RestoreBatchItem> restoreBatch(
@@ -514,10 +543,10 @@ public class TrashService {
         return null;
     }
 
-    /** File 02 §3.1 AC-2: {@code "<tên> (khôi phục yyyyMMdd-HHmm)"}. */
-    private static String renamedName(String originalName) {
-        String timestamp = OffsetDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
-        return originalName + " (khôi phục " + timestamp + ")";
+    private boolean displayNameTaken(UUID folderId, Document document, String name) {
+        return documentRepository.existsAliveDisplayName(
+                (folderId == null ? NameCheckRepository.SENTINEL : folderId).toString(),
+                document.getRelativePath(), name, document.getId().toString());
     }
 
     private void writeTrashOutboxEvent(List<UUID> documentIds, OffsetDateTime changedAt) {

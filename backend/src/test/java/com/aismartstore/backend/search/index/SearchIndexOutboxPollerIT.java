@@ -98,7 +98,7 @@ class SearchIndexOutboxPollerIT {
     @Container
     static GenericContainer<?> opensearch = new GenericContainer<>(new ImageFromDockerfile(
                     "aismartstore-opensearch-icu-test", false)
-            .withFileFromPath(".", Paths.get(System.getProperty("user.dir"), "..", "main-workspace", "opensearch")
+            .withFileFromPath(".", Paths.get(System.getProperty("user.dir"), "..", "opensearch")
                     .normalize()))
             .withExposedPorts(9200)
             .withEnv("discovery.type", "single-node")

@@ -471,6 +471,7 @@ public class SearchIndexOutboxPoller {
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("document_id", f.documentId().toString());
         source.put("document_name", f.documentName());
+        source.put("display_name", f.displayName());
         putCommonFields(source, f, externalVersion);
         return source;
     }

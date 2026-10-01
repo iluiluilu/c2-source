@@ -19,4 +19,15 @@ public interface PersonalFileRepository extends JpaRepository<PersonalFile, UUID
     /** Live SUM over the owner's rows - single source of truth for usage, never a drifting counter. */
     @Query("select coalesce(sum(f.size), 0) from PersonalFile f where f.ownerSub = :ownerSub")
     long sumSizeByOwnerSub(@Param("ownerSub") String ownerSub);
+
+    /** Same expression as UQ_personal_file_display_name (R14); {@code folderKey} = folder id or the all-zero sentinel. */
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM personal_file f WHERE f.owner_sub = :ownerSub "
+            + "AND COALESCE(f.folder_id, '00000000-0000-0000-0000-000000000000'::uuid) = CAST(:folderKey AS uuid) "
+            + "AND md5(f.relative_path || '/' || lower(f.display_name)) = md5(:path || '/' || lower(:name)))",
+            nativeQuery = true)
+    boolean existsDisplayName(
+            @Param("ownerSub") String ownerSub,
+            @Param("folderKey") String folderKey,
+            @Param("path") String path,
+            @Param("name") String name);
 }

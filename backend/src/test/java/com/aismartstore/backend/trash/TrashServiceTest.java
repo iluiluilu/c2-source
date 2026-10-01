@@ -90,15 +90,14 @@ class TrashServiceTest {
         // so they aren't accidentally exercised; the dedicated tests below
         // override this per case.
         when(warehouseService.folderExists(any())).thenReturn(true);
-        when(documentRepository.findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-                        any(), any(), any(), any()))
-                .thenReturn(Optional.empty());
+        when(documentRepository.existsAliveDisplayName(any(), any(), any(), any())).thenReturn(false);
     }
 
     private static Document activeDocument(String uploaderSub) {
         Document document = new Document();
         ReflectionTestUtils.setField(document, "id", UUID.randomUUID());
         document.setOriginalName("f.txt");
+        document.setDisplayName("f.txt");
         document.setUploaderSub(uploaderSub);
         document.setUploaderUsername(uploaderSub);
         document.setSize(10);
@@ -366,12 +365,12 @@ class TrashServiceTest {
     @Test
     void restoreRejectsWithNameConflictWhenNotAutoRenamed() {
         Document trashed = trashedDocument(owner.sub());
-        Document existing = activeDocument("someone");
         when(documentRepository.findByIdAndDeletedAtIsNotNull(trashed.getId())).thenReturn(Optional.of(trashed));
-        when(documentRepository.findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-                        trashed.getFolderId(), trashed.getRelativePath(), trashed.getOriginalName(),
-                        DocumentStatus.CLEAN))
-                .thenReturn(Optional.of(existing));
+        // SPEC-folder-upload-display-name: only the original display name is taken; suffix names are free.
+        when(documentRepository.existsAliveDisplayName(
+                        trashed.getFolderId().toString(), trashed.getRelativePath(), "f.txt",
+                        trashed.getId().toString()))
+                .thenReturn(true);
 
         assertThatThrownBy(() -> service.restore(owner, trashed.getId(), null, null))
                 .isInstanceOf(ApiException.class)
@@ -386,18 +385,20 @@ class TrashServiceTest {
     @Test
     void restoreAutoRenamesWhenNameConflictAndAutoRenameRequested() {
         Document trashed = trashedDocument(owner.sub());
-        Document existing = activeDocument("someone");
         when(documentRepository.findByIdAndDeletedAtIsNotNull(trashed.getId())).thenReturn(Optional.of(trashed));
-        when(documentRepository.findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-                        trashed.getFolderId(), trashed.getRelativePath(), trashed.getOriginalName(),
-                        DocumentStatus.CLEAN))
-                .thenReturn(Optional.of(existing));
+        // SPEC-folder-upload-display-name: only the original display name is taken; suffix names are free.
+        when(documentRepository.existsAliveDisplayName(
+                        trashed.getFolderId().toString(), trashed.getRelativePath(), "f.txt",
+                        trashed.getId().toString()))
+                .thenReturn(true);
         when(documentGroupShareRepository.findDeletedGroupIdsForDocument(trashed.getId())).thenReturn(List.of());
 
         TrashService.RestoreResult result = service.restore(owner, trashed.getId(), null, "AUTO_RENAME");
 
         assertThat(result.restoredName()).isNotEqualTo("f.txt");
-        assertThat(result.restoredName()).startsWith("f.txt (khôi phục ");
+        assertThat(result.restoredName()).matches("f_\\d{17}-[a-z0-9]{6}\\.txt");
+        assertThat(trashed.getDisplayName()).isEqualTo(result.restoredName());
+        assertThat(trashed.getOriginalName()).isEqualTo(result.restoredName());
         assertThat(trashed.getPurgeState()).isEqualTo(PurgeState.ACTIVE);
     }
 

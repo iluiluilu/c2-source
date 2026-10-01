@@ -6,6 +6,9 @@ import com.aismartstore.backend.common.ApiException;
 import com.aismartstore.backend.common.BadRequestException;
 import com.aismartstore.backend.common.NotFoundException;
 import com.aismartstore.backend.common.ServiceUnavailableException;
+import com.aismartstore.backend.displayname.DisplayNameValidator;
+import com.aismartstore.backend.displayname.NameCheckRepository;
+import com.aismartstore.backend.displayname.NameCheckRequest;
 import com.aismartstore.backend.documents.DocumentRepository;
 import com.aismartstore.backend.ingest.BatchKind;
 import com.aismartstore.backend.ingest.UploadBatch;
@@ -56,6 +59,7 @@ public class PersonalToWarehouseService {
     private final WarehouseCapacityService warehouseCapacityService;
     private final AllowlistService allowlistService;
     private final DocumentRepository documentRepository;
+    private final NameCheckRepository nameCheckRepository;
     private final AuditService auditService;
     private final PersonalIngestWorker worker;
     private final TransactionTemplate transactionTemplate;
@@ -71,6 +75,7 @@ public class PersonalToWarehouseService {
             WarehouseCapacityService warehouseCapacityService,
             AllowlistService allowlistService,
             DocumentRepository documentRepository,
+            NameCheckRepository nameCheckRepository,
             AuditService auditService,
             PersonalIngestWorker worker,
             PlatformTransactionManager transactionManager,
@@ -84,6 +89,7 @@ public class PersonalToWarehouseService {
         this.warehouseCapacityService = warehouseCapacityService;
         this.allowlistService = allowlistService;
         this.documentRepository = documentRepository;
+        this.nameCheckRepository = nameCheckRepository;
         this.auditService = auditService;
         this.worker = worker;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -97,8 +103,22 @@ public class PersonalToWarehouseService {
     }
 
     public record ItemView(
-            UUID personalFileId, String name, String status, String code, UUID documentId, List<UUID> duplicateOf) {
+            UUID personalFileId,
+            String name,
+            String status,
+            String code,
+            UUID documentId,
+            List<UUID> duplicateOf,
+            UUID itemId,
+            String displayName,
+            int nameRetryCount) {
     }
+
+    /** {@code POST /ingest/from-personal/name-check} element (same order as the expanded selection). */
+    public record NameCheckItem(UUID personalFileId, String relativePath, String originalName, boolean taken) {
+    }
+
+    public static final int MAX_NAME_RETRIES = 3;
 
     public record BatchResultView(UUID batchId, String status, int done, int total, List<ItemView> items) {
     }
@@ -130,10 +150,19 @@ public class PersonalToWarehouseService {
         UploadBatchService.Limits limits = uploadBatchService.getLimits();
         List<Collected> eligible = new ArrayList<>();
         Map<UUID, String> ineligibleCodes = new LinkedHashMap<>();
+        Map<UUID, String> displayNames = new HashMap<>();
+        for (FromPersonalDto.DisplayNameEntry entry : dto.displayNamesOrEmpty()) {
+            if (entry != null && entry.personalFileId() != null) {
+                displayNames.put(entry.personalFileId(), entry.displayName());
+            }
+        }
         long eligibleBytes = 0;
         for (Collected c : collected) {
             PersonalFile f = c.file();
-            if (!allowlistService.isAllowedByNameAndMime(f.getOriginalName(), f.getMimeType())) {
+            String nameProblem = displayNameProblem(f, displayNames.get(f.getId()));
+            if (nameProblem != null) {
+                ineligibleCodes.put(f.getId(), nameProblem);
+            } else if (!allowlistService.isAllowedByNameAndMime(f.getOriginalName(), f.getMimeType())) {
                 ineligibleCodes.put(f.getId(), "INVALID_FORMAT");
             } else if (f.getSize() > limits.maxFileSizeBytes()) {
                 ineligibleCodes.put(f.getId(), "FILE_TOO_LARGE");
@@ -185,6 +214,7 @@ public class PersonalToWarehouseService {
                 item.setOriginalName(c.file().getOriginalName());
                 item.setSize(c.file().getSize());
                 item.setRelativePath(c.relativePath());
+                item.setDisplayName(displayNames.get(c.file().getId()));
                 String code = ineligibleCodes.get(c.file().getId());
                 if (code != null) {
                     item.setStatus(PersonalIngestItem.FAILED);
@@ -217,6 +247,119 @@ public class PersonalToWarehouseService {
         }
 
         return new StartResult(batch.getId(), collected.size(), ineligible, batch.getExpiresAt());
+    }
+
+    /** null when the client-supplied name is acceptable, else the item failure code (AC-18/AC-28). */
+    private static String displayNameProblem(PersonalFile f, String displayName) {
+        if (displayName == null) {
+            return "DISPLAY_NAME_MISSING";
+        }
+        String original = DisplayNameValidator.nfc(f.getOriginalName());
+        if (DisplayNameValidator.cpLength(original) > DisplayNameValidator.MAX_NAME_CODE_POINTS) {
+            return "ORIGINAL_NAME_TOO_LONG";
+        }
+        return DisplayNameValidator.checkReason(original, displayName) == null ? null : "INVALID_DISPLAY_NAME";
+    }
+
+    /**
+     * AC-18: which names of the (expanded) selection are already taken in the target folder. Uses the same
+     * {@link #collect} expansion as {@link #start}, so paths match what the worker will write.
+     */
+    public List<NameCheckItem> nameCheck(KeycloakUser user, FromPersonalDto dto) {
+        List<UUID> fileIds = dto.fileIdsOrEmpty();
+        List<UUID> folderIds = dto.folderIdsOrEmpty();
+        if (fileIds.isEmpty() && folderIds.isEmpty()) {
+            throw new BadRequestException("fileIds or folderIds must not be empty");
+        }
+        if (!warehouseService.folderExists(dto.targetFolderId())) {
+            throw new NotFoundException("Folder not found");
+        }
+        List<Collected> collected = collect(user, fileIds, folderIds);
+        if (collected.size() > NameCheckRequest.MAX_FILES) {
+            throw new BadRequestException("Tối đa " + NameCheckRequest.MAX_FILES + " tệp mỗi lần kiểm tra tên");
+        }
+        List<NameCheckRepository.Candidate> candidates = collected.stream()
+                .map(c -> new NameCheckRepository.Candidate(
+                        DisplayNameValidator.nfc(c.relativePath()), DisplayNameValidator.nfc(c.file().getOriginalName())))
+                .toList();
+        boolean[] taken = nameCheckRepository.warehouseTaken(dto.targetFolderId(), candidates);
+        List<NameCheckItem> out = new ArrayList<>(collected.size());
+        for (int i = 0; i < collected.size(); i++) {
+            Collected c = collected.get(i);
+            out.add(new NameCheckItem(c.file().getId(), c.relativePath(), c.file().getOriginalName(), taken[i]));
+        }
+        return out;
+    }
+
+    /**
+     * AC-20: the client picked a new name for an item that failed with DISPLAY_NAME_CONFLICT. At most
+     * {@link #MAX_NAME_RETRIES} times per item (counted server-side); re-runs just that item.
+     */
+    public ItemView renameItem(KeycloakUser user, UUID batchId, UUID itemId, String newDisplayName) {
+        UploadBatch batch = uploadBatchRepository
+                .findByIdAndOwnerSubAndKind(batchId, user.sub(), BatchKind.WAREHOUSE)
+                .orElseThrow(PersonalToWarehouseService::batchNotFound);
+        PersonalIngestItem item = itemRepository.findById(itemId)
+                .filter(i -> batchId.equals(i.getBatchId()))
+                .orElseThrow(PersonalToWarehouseService::batchNotFound);
+        if (!PersonalIngestItem.FAILED.equals(item.getStatus()) || !"DISPLAY_NAME_CONFLICT".equals(item.getCode())) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    errorBody("ITEM_NOT_RENAMEABLE", "Tệp không ở trạng thái trùng tên"), "Item not renameable");
+        }
+        if (item.getNameRetryCount() >= MAX_NAME_RETRIES) {
+            throw new BadRequestException("Đã đổi tên tối đa " + MAX_NAME_RETRIES + " lần cho tệp này");
+        }
+        if (UploadBatchStatus.OPEN.equals(uploadBatchService.getStatus(batchId).getStatus())) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    errorBody("BATCH_RUNNING", "Lượt bổ sung đang chạy, vui lòng thử lại sau"), "Batch running");
+        }
+        DisplayNameValidator.validate(item.getOriginalName(), newDisplayName);
+
+        item.setDisplayName(newDisplayName);
+        item.setNameRetryCount(item.getNameRetryCount() + 1);
+        item.setStatus(PersonalIngestItem.PENDING);
+        item.setCode(null);
+        item.setProcessedAt(null);
+        itemRepository.save(item);
+
+        // Re-open the (closed) batch so the worker can take it; the worker closes it again when done.
+        OffsetDateTime now = OffsetDateTime.now();
+        transactionTemplate.executeWithoutResult(status -> {
+            UploadBatch b = uploadBatchRepository.findById(batchId).orElseThrow();
+            b.setStatus(UploadBatchStatus.OPEN);
+            b.setExpiresAt(now.plusHours(24));
+            b.setUpdatedAt(now);
+            uploadBatchRepository.save(b);
+        });
+        try {
+            worker.run(user, batchId, batch.getTargetFolderId(), null);
+        } catch (TaskRejectedException e) {
+            failPendingAndClose(batchId, "SERVER_BUSY");
+            throw new ServiceUnavailableException(
+                    errorBody("SERVER_BUSY", "Máy chủ đang bận, vui lòng thử lại sau"),
+                    "Personal ingest executor saturated");
+        }
+        return toView(item);
+    }
+
+    private static Map<String, Object> errorBody(String code, String message) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", code);
+        body.put("message", message);
+        return body;
+    }
+
+    private static ItemView toView(PersonalIngestItem i) {
+        return new ItemView(
+                i.getPersonalFileId(),
+                i.getOriginalName(),
+                i.getStatus(),
+                i.getCode(),
+                i.getDocumentId(),
+                i.getDuplicateOf() == null ? List.of() : List.of(i.getDuplicateOf()),
+                i.getId(),
+                i.getDisplayName(),
+                i.getNameRetryCount());
     }
 
     private void failPendingAndClose(UUID batchId, String code) {
@@ -261,7 +404,7 @@ public class PersonalToWarehouseService {
             PersonalFile f = fileRepository
                     .findByIdAndOwnerSub(id, user.sub())
                     .orElseThrow(PersonalToWarehouseService::selectionNotFound);
-            result.putIfAbsent(f.getId(), new Collected(f, ""));
+            result.putIfAbsent(f.getId(), new Collected(f, joinPath("", f.getRelativePath())));
         }
 
         if (!folderIds.isEmpty()) {
@@ -302,9 +445,20 @@ public class PersonalToWarehouseService {
             List<PersonalFile> files = fileRepository.findByOwnerSubAndFolderIdIn(user.sub(), pathByFolder.keySet());
             files.stream()
                     .sorted((a, b) -> a.getOriginalName().compareToIgnoreCase(b.getOriginalName()))
-                    .forEach(f -> result.putIfAbsent(f.getId(), new Collected(f, pathByFolder.get(f.getFolderId()))));
+                    .forEach(f -> result.putIfAbsent(
+                            f.getId(), new Collected(f, joinPath(pathByFolder.get(f.getFolderId()), f.getRelativePath()))));
         }
         return new ArrayList<>(result.values());
+    }
+
+    /** AC-19: warehouse relative_path = personal folder tree path + the file's own relative_path. */
+    static String joinPath(String folderPath, String fileRelativePath) {
+        String a = folderPath == null ? "" : folderPath;
+        String b = fileRelativePath == null ? "" : fileRelativePath;
+        if (a.isEmpty()) {
+            return b;
+        }
+        return b.isEmpty() ? a : a + "/" + b;
     }
 
     // ---------------------------------------------------------------- status
@@ -321,15 +475,7 @@ public class PersonalToWarehouseService {
         batch = uploadBatchService.getStatus(batchId);
 
         int done = (int) items.stream().filter(i -> !PersonalIngestItem.PENDING.equals(i.getStatus())).count();
-        List<ItemView> views = items.stream()
-                .map(i -> new ItemView(
-                        i.getPersonalFileId(),
-                        i.getOriginalName(),
-                        i.getStatus(),
-                        i.getCode(),
-                        i.getDocumentId(),
-                        i.getDuplicateOf() == null ? List.of() : List.of(i.getDuplicateOf())))
-                .toList();
+        List<ItemView> views = items.stream().map(PersonalToWarehouseService::toView).toList();
         String status = UploadBatchStatus.OPEN.equals(batch.getStatus()) ? "OPEN" : "CLOSED";
         return new BatchResultView(batchId, status, done, items.size(), views);
     }

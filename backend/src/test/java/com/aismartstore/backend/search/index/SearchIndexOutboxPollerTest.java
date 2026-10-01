@@ -75,7 +75,7 @@ class SearchIndexOutboxPollerTest {
         return new DocumentIndexFieldsBuilder.Fields(
                 documentId, "file.pdf", "văn bản", List.of("chu-de"), UUID.randomUUID().toString(),
                 List.of(UUID.randomUUID().toString()), OffsetDateTime.now(), "document", "owner-sub", List.of(),
-                CONTENT_VERSION);
+                CONTENT_VERSION, "file.pdf");
     }
 
     private static OutboxEvent event(long id, String eventType, Map<String, Object> payload) {

@@ -485,4 +485,30 @@ class TagsControllerIT {
         mockMvc.perform(get("/tags/report").param("kind", "topic").with(admin()))
                 .andExpect(status().isForbidden());
     }
+
+    // ---- r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has
+    // tag.manage too (SPEC-r2-business-parity-01 AC-1, R-7). ------------------
+
+    @Test
+    void leaderCanCreateAndAttachTag() throws Exception {
+        Document document = saveDocument("leader-1");
+
+        String json = mockMvc.perform(post("/tags")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("kind", "topic", "label", "Nhãn R2"))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
+        UUID tagId = UUID.fromString((String) parsed.get("id"));
+
+        mockMvc.perform(post("/documents/" + document.getId() + "/tags")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("tagId", tagId))))
+                .andExpect(status().isCreated());
+    }
 }

@@ -61,6 +61,8 @@ public class DocumentIndexFieldsBuilder {
      * @param documentId     mirrors {@code document_id}
      * @param documentName   {@code document.original_name} - {@code document}
      *                       index's {@code document_name} field only
+     * @param displayName    {@code document.display_name} - stored only ({@code index:false}); search still
+     *                       matches {@code document_name} = original_name
      * @param docType        the single {@code doc_type} tag label, or
      *                       {@code null} if not yet classified (US2 AC-5)
      * @param topicTags      every {@code topic} tag label currently assigned
@@ -105,7 +107,8 @@ public class DocumentIndexFieldsBuilder {
             String mediaType,
             String ownerUserId,
             List<String> scopeGroupIds,
-            long contentVersion) {
+            long contentVersion,
+            String displayName) {
     }
 
     /** Empty if the document no longer exists or is soft-deleted (a stale/late event for it is simply ignored). */
@@ -170,7 +173,8 @@ public class DocumentIndexFieldsBuilder {
                 MediaTypeResolver.resolve(document.getMimeType()),
                 document.getUploaderSub(),
                 scopeGroupIds,
-                contentVersion));
+                contentVersion,
+                document.getDisplayName()));
     }
 
     /**

@@ -11,7 +11,16 @@ public record FromPersonalDto(
         @NotNull UUID targetFolderId,
         @Size(max = NoteConstraints.NOTE_MAX_LENGTH) String note,
         List<UUID> fileIds,
-        List<UUID> folderIds) {
+        List<UUID> folderIds,
+        List<DisplayNameEntry> displayNames) {
+
+    /** SPEC-folder-upload-display-name: the display name the client picked for one selected personal file. */
+    public record DisplayNameEntry(UUID personalFileId, String displayName) {
+    }
+
+    public List<DisplayNameEntry> displayNamesOrEmpty() {
+        return displayNames == null ? List.of() : displayNames;
+    }
 
     public List<UUID> fileIdsOrEmpty() {
         return fileIds == null ? List.of() : fileIds;

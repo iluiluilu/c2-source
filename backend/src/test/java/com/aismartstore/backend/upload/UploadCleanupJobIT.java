@@ -256,6 +256,7 @@ class UploadCleanupJobIT {
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "originalName", originalName,
+                                "displayName", originalName,
                                 "relativePath", "",
                                 "declaredSizeBytes", declaredSizeBytes,
                                 "mimeType", "image/png"))))

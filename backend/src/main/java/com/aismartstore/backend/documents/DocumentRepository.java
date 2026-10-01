@@ -33,13 +33,19 @@ public interface DocumentRepository
     List<Document> findBySha256AndStatus(String sha256, String status);
 
     /**
-     * data-ingestion.md §4.2 step 3 (Story 4 AC-2): re-upload de-dup key,
-     * restricted to 'clean' AND not soft-deleted - MUST stay in lockstep with
-     * {@code UQ_document_folder_relpath_name_clean} (V10, same WHERE
-     * clause), or a duplicate this query misses can trip that unique index.
+     * SPEC-folder-upload-display-name: same expression/predicate as {@code UQ_document_display_name_alive}
+     * (R14). {@code folderKey} = folder id or the all-zero sentinel uuid; {@code excludeId} skips the row itself.
      */
-    Optional<Document> findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-            UUID folderId, String relativePath, String originalName, String status);
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM document d "
+            + "WHERE COALESCE(d.folder_id, '00000000-0000-0000-0000-000000000000'::uuid) = CAST(:folderKey AS uuid) "
+            + "AND md5(d.relative_path || '/' || lower(d.display_name)) = md5(:path || '/' || lower(:name)) "
+            + "AND d.deleted_at IS NULL AND d.status <> 'rejected' AND d.id <> CAST(:excludeId AS uuid))",
+            nativeQuery = true)
+    boolean existsAliveDisplayName(
+            @Param("folderKey") String folderKey,
+            @Param("path") String path,
+            @Param("name") String name,
+            @Param("excludeId") String excludeId);
 
     /** Story 3 AC-1/AC-2: folder deletion is blocked only by ACTIVE (not soft-deleted) data. */
     boolean existsByFolderIdAndStatusAndDeletedAtIsNull(UUID folderId, String status);

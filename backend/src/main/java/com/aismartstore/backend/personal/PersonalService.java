@@ -13,6 +13,8 @@ import com.aismartstore.backend.common.ServiceUnavailableException;
 import com.aismartstore.backend.common.SqlErrors;
 import com.aismartstore.backend.common.UnprocessableEntityException;
 import com.aismartstore.backend.config.StorageProperties;
+import com.aismartstore.backend.displayname.DisplayNameValidator;
+import com.aismartstore.backend.displayname.NameCheckRepository;
 import com.aismartstore.backend.ingest.BatchKind;
 import com.aismartstore.backend.ingest.UploadBatch;
 import com.aismartstore.backend.ingest.UploadBatchRepository;
@@ -413,11 +415,24 @@ public class PersonalService {
      * aren't evidence, the audit event is the only trace - and the bytes
      * land in the hard-deletable personal bucket under {@code <sub>/<uuid>}.
      */
-    public PersonalFile uploadFileInBatch(KeycloakUser user, UUID batchId, UUID folderId, MultipartFile file) {
+    public PersonalFile uploadFileInBatch(
+            KeycloakUser user, UUID batchId, UUID folderId, MultipartFile file, String relativePathParam,
+            String displayNameParam) {
         UploadBatch batch = findOwnedOpenBatch(user, batchId);
 
         if (folderId != null) {
             findOwnedFolder(user, folderId);
+        }
+
+        // SPEC-folder-upload-display-name (QD4, AC-28): validate before touching the bytes, then a cheap
+        // early conflict check; UQ_personal_file_display_name stays the authoritative arbiter.
+        String relativePath = DisplayNameValidator.normalizeRelativePath(relativePathParam);
+        String rawName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unnamed";
+        String displayName = DisplayNameValidator.validate(rawName, displayNameParam);
+        if (fileRepository.existsDisplayName(
+                user.sub(), (folderId == null ? NameCheckRepository.SENTINEL : folderId).toString(), relativePath, displayName)) {
+            log.info("display_name conflict (early) context=personal");
+            throw DisplayNameValidator.conflict();
         }
 
         // §4.2 step 2b (Quyết định 2 mục 0): per-file size cap, shared with
@@ -457,7 +472,9 @@ public class PersonalService {
 
             PersonalFile saved;
             try {
-                saved = commitFileInsert(user, batch.getId(), folderId, originalName, mimeType, sha256, storageKey, size);
+                saved = commitFileInsert(
+                        user, batch.getId(), folderId, originalName, displayName, relativePath, mimeType, sha256,
+                        storageKey, size);
             } catch (RuntimeException e) {
                 // The object was already stored; compensate so it can't orphan. A
                 // crash between put and commit can still orphan one - logged debt,
@@ -491,8 +508,8 @@ public class PersonalService {
      * §1/§4.5 for why the two pipelines deliberately differ here).
      */
     private PersonalFile commitFileInsert(
-            KeycloakUser user, UUID batchId, UUID folderId, String originalName, String mimeType, String sha256,
-            String storageKey, long size) {
+            KeycloakUser user, UUID batchId, UUID folderId, String originalName, String displayName,
+            String relativePath, String mimeType, String sha256, String storageKey, long size) {
         return transactionTemplate.execute(status -> {
             entityManager.unwrap(Session.class).doWork(connection -> {
                 try (var statement = connection.prepareStatement("SELECT pg_advisory_xact_lock(hashtext(?))")) {
@@ -512,13 +529,24 @@ public class PersonalService {
             file.setOwnerUsername(user.preferredUsername());
             file.setFolderId(folderId);
             file.setOriginalName(originalName);
+            file.setDisplayName(displayName);
+            file.setRelativePath(relativePath);
             file.setMimeType(mimeType);
             file.setSize(size);
             file.setSha256(sha256);
             file.setStorageKey(storageKey);
             file.setBatchId(batchId);
             file.setCreatedAt(OffsetDateTime.now());
-            PersonalFile saved = fileRepository.save(file);
+            PersonalFile saved;
+            try {
+                saved = fileRepository.saveAndFlush(file);
+            } catch (DataIntegrityViolationException e) {
+                if (SqlErrors.isUniqueViolation(e)) {
+                    log.info("display_name conflict (unique) context=personal");
+                    throw DisplayNameValidator.conflict();
+                }
+                throw e;
+            }
 
             // Display-only progress counters (Story 3 AC-1/AC-3) - NOT the quota
             // enforcement mechanism (that's the SUM re-check above, under the
@@ -541,7 +569,15 @@ public class PersonalService {
             findOwnedFolder(user, folderId);
         }
         file.setFolderId(folderId);
-        fileRepository.save(file);
+        try {
+            fileRepository.saveAndFlush(file);
+        } catch (DataIntegrityViolationException e) {
+            if (SqlErrors.isUniqueViolation(e)) {
+                // the target folder already holds a file with the same relative_path + display_name
+                throw DisplayNameValidator.conflict();
+            }
+            throw e;
+        }
 
         auditService.recordAsync(new AuditService.AuditEntry(
                 user.preferredUsername(), user.sub(), "personal.file.move", "personal_file", file.getId().toString(),

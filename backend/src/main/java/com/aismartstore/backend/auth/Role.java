@@ -12,7 +12,7 @@ package com.aismartstore.backend.auth;
 public final class Role {
     /** R1 - Cán bộ (officer). Keycloak realm role: can-bo. */
     public static final String CAN_BO = "CAN_BO";
-    /** R2 - Lãnh đạo (leadership, read-only). Keycloak realm role: lanh-dao. */
+    /** R2 - Lãnh đạo (leadership). Keycloak realm role: lanh-dao. */
     public static final String LANH_DAO = "LANH_DAO";
     /** R3 - Quản trị hệ thống (system admin). Keycloak realm role: quan-tri. */
     public static final String QUAN_TRI = "QUAN_TRI";

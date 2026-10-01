@@ -13,10 +13,11 @@ public record PersonalFileView(
         String ownerUsername,
         UUID folderId,
         String originalName,
+        String displayName,
+        String relativePath,
         String mimeType,
         long size,
         String sha256,
-        String storageKey,
         UUID batchId,
         OffsetDateTime createdAt,
         boolean addedToWarehouse) {
@@ -24,7 +25,7 @@ public record PersonalFileView(
     public static PersonalFileView of(PersonalFile f, boolean addedToWarehouse) {
         return new PersonalFileView(
                 f.getId(), f.getOwnerSub(), f.getOwnerUsername(), f.getFolderId(), f.getOriginalName(),
-                f.getMimeType(), f.getSize(), f.getSha256(), f.getStorageKey(), f.getBatchId(), f.getCreatedAt(),
+                f.getDisplayName(), f.getRelativePath(), f.getMimeType(), f.getSize(), f.getSha256(), f.getBatchId(), f.getCreatedAt(),
                 addedToWarehouse);
     }
 }

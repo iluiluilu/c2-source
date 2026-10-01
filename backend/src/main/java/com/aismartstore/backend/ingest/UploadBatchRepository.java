@@ -57,6 +57,13 @@ public interface UploadBatchRepository extends JpaRepository<UploadBatch, UUID> 
             @Param("maxFiles") long maxFiles,
             @Param("maxBytes") long maxBytes);
 
+    /** Gives back one {@link #reserve} (DISPLAY_NAME_CONFLICT after reservation: the client retries the file). */
+    @Modifying
+    @Query("UPDATE UploadBatch b SET b.actualFileCount = b.actualFileCount - 1, "
+            + "b.actualTotalBytes = b.actualTotalBytes - :size, b.updatedAt = CURRENT_TIMESTAMP "
+            + "WHERE b.id = :id AND b.actualFileCount > 0")
+    int release(@Param("id") UUID id, @Param("size") long size);
+
     @Modifying
     @Query("UPDATE UploadBatch b SET b.status = :status, b.updatedAt = CURRENT_TIMESTAMP WHERE b.id = :id")
     int updateStatus(@Param("id") UUID id, @Param("status") String status);

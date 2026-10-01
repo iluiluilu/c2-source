@@ -181,6 +181,11 @@ class ReviewControllerIT {
         return asRole("leader-1", "lanh-dao", "LANH_DAO");
     }
 
+    /** R3 - QUAN_TRI: không có {@code digitization_review.manage}. */
+    private static JwtRequestPostProcessor admin() {
+        return asRole("admin-1", "quan-tri", "QUAN_TRI");
+    }
+
     private Document saveDocument(String uploaderSub) {
         Document document = new Document();
         document.setOriginalName("scan-" + UUID.randomUUID() + ".png");
@@ -307,6 +312,27 @@ class ReviewControllerIT {
                 .andExpect(jsonPath("$.content[0].documentId").value(mine.getId().toString()));
     }
 
+    // SPEC-r2-business-parity-01 AC-9 (R-6): same uploader-scoped queue for R2
+    // (LANH_DAO) - uploader_sub=leader-1 shows in the leader's own queue, not
+    // in another officer's.
+    @Test
+    void queue_forR2OnlyListsRunsUploadedByTheLeader() throws Exception {
+        Document mine = saveDocument("leader-1");
+        seedPendingOcrRunWithOneSegment(mine.getId(), saveSource(mine.getId()));
+        Document someoneElses = saveDocument("officer-2");
+        seedPendingOcrRunWithOneSegment(someoneElses.getId(), saveSource(someoneElses.getId()));
+
+        mockMvc.perform(get("/digitization-review/queue").with(leader()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].documentId").value(mine.getId().toString()));
+
+        mockMvc.perform(get("/digitization-review/queue").with(officer("officer-2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].documentId").value(someoneElses.getId().toString()));
+    }
+
     // ---- digitization-review-06-queue-pending-status.md: processingStatus ------
 
     /**
@@ -406,13 +432,31 @@ class ReviewControllerIT {
         assertThat(digitizationRunRepository.findById(run.getId()).orElseThrow().getFirstViewedAt()).isNotNull();
     }
 
+    // r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has
+    // digitization_review.manage too (SPEC-r2-business-parity-01 AC-1, R-7) -
+    // only QUAN_TRI (R3) still lacks it; "chính chủ" still applies to R2 same
+    // as R1 (see leaderOwnerCanViewQueueRunAndConfirm below).
     @Test
     void missingPermission_returns403() throws Exception {
         Document document = saveDocument("officer-1");
         DigitizationRun run = seedPendingOcrRunWithOneSegment(document.getId(), saveSource(document.getId()));
 
-        mockMvc.perform(get("/digitization-review/runs/" + run.getId()).with(leader()))
+        mockMvc.perform(get("/digitization-review/runs/" + run.getId()).with(admin()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void leaderOwnerCanViewQueueRunAndConfirm() throws Exception {
+        Document document = saveDocument("leader-1");
+        DigitizationRun run = seedPendingOcrRunWithOneSegment(document.getId(), saveSource(document.getId()));
+
+        mockMvc.perform(get("/digitization-review/queue").with(leader()))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/digitization-review/runs/" + run.getId()).with(leader()))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/digitization-review/runs/" + run.getId() + "/confirm").with(leader()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewState").value("confirmed"));
     }
 
     // ---- Story 2 AC-3: optimistic lock -------------------------------------------

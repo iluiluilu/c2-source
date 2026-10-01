@@ -1,7 +1,6 @@
 package com.aismartstore.backend.trash;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,6 +12,7 @@ import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
 import com.aismartstore.backend.documents.DocumentStatus;
 import com.aismartstore.backend.documents.PurgeState;
+import com.aismartstore.backend.outbox.OutboxEventRepository;
 import com.aismartstore.backend.storage.ObjectStorageService;
 import com.aismartstore.backend.testsupport.RolePermissionFixtures;
 import com.aismartstore.backend.warehouse.WarehouseFolder;
@@ -92,6 +92,9 @@ class TrashRestoreConflictControllerIT {
 
     @Autowired
     private WarehouseService warehouseService;
+
+    @Autowired
+    private OutboxEventRepository outboxEventRepository;
 
     private UUID rootFolderId;
 
@@ -185,22 +188,17 @@ class TrashRestoreConflictControllerIT {
 
     @Test
     void nameConflictOnRestoreIsRejectedUnlessAutoRenameRequested() throws Exception {
-        // Trash first under a placeholder name (both an active AND a trashed
-        // document with the same (folderId, relativePath, originalName)
-        // would trip UQ_document_folder_relpath_name_clean at insert time,
-        // since that partial unique index only excludes deleted_at IS NOT
-        // NULL rows) - then rename it to "dup.txt" now that it's already
-        // soft-deleted (safe: the index no longer applies to it), and only
-        // THEN create the active "dup.txt" document that occupies the name
-        // at restore time (the realistic AC-2 scenario: an active document
-        // is created/renamed into that name sometime after the trash item).
+        // SPEC-folder-upload-display-name BE-8: the conflict is judged on display_name (case-insensitive,
+        // live documents only). A trashed document does not hold its name, so trash first, then rename it to
+        // "dup.txt" (safe while soft-deleted) and only then create the live document that occupies the name.
         Document trashed = saveDocument("officer-a", rootFolderId, "dup-tmp.txt");
         trashViaHttp("officer-a", trashed.getId());
         trashed = documentRepository.findById(trashed.getId()).orElseThrow();
         trashed.setOriginalName("dup.txt");
+        trashed.setDisplayName("dup.txt");
         documentRepository.save(trashed);
 
-        saveDocument("officer-a", rootFolderId, "dup.txt"); // active document now occupying the name
+        saveDocument("officer-a", rootFolderId, "DUP.txt"); // live document holding the name (different case)
 
         mockMvc.perform(post("/trash/" + trashed.getId() + "/restore")
                         .with(officer("officer-a"))
@@ -209,15 +207,61 @@ class TrashRestoreConflictControllerIT {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("NAME_CONFLICT"))
                 .andExpect(jsonPath("$.suggestedName").exists());
+        // CANCEL is the same as no override: still a conflict, nothing changes
+        mockMvc.perform(post("/trash/" + trashed.getId() + "/restore")
+                        .with(officer("officer-a"))
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("onNameConflict", "CANCEL"))))
+                .andExpect(status().isConflict());
+        assertThat(documentRepository.findById(trashed.getId()).orElseThrow().getDeletedAt()).isNotNull();
 
         mockMvc.perform(post("/trash/" + trashed.getId() + "/restore")
                         .with(officer("officer-a"))
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("onNameConflict", "AUTO_RENAME"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.restoredName", startsWith("dup.txt (khôi phục ")));
+                .andExpect(jsonPath("$.restoredName", org.hamcrest.Matchers.matchesPattern("dup_\\d{17}-[a-z0-9]{6}\\.txt")));
 
-        assertThat(documentRepository.findById(trashed.getId()).orElseThrow().getDeletedAt()).isNull();
+        Document restored = documentRepository.findById(trashed.getId()).orElseThrow();
+        assertThat(restored.getDeletedAt()).isNull();
+        // "Đổi tên" rewrites BOTH names with the suffix name
+        assertThat(restored.getDisplayName()).matches("dup_\\d{17}-[a-z0-9]{6}\\.txt");
+        assertThat(restored.getOriginalName()).isEqualTo(restored.getDisplayName());
+        // reindex event so search sees the new name
+        assertThat(outboxEventRepository.findAll())
+                .anySatisfy(e -> assertThat(e.getEventType()).isEqualTo("document.restored"));
+    }
+
+    @Test
+    void restoreWithAFreeNameKeepsBothNamesUnchanged() throws Exception {
+        Document trashed = saveDocument("officer-a", rootFolderId, "free.txt");
+        trashViaHttp("officer-a", trashed.getId());
+
+        mockMvc.perform(post("/trash/" + trashed.getId() + "/restore")
+                        .with(officer("officer-a"))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.restoredName").value("free.txt"));
+        Document restored = documentRepository.findById(trashed.getId()).orElseThrow();
+        assertThat(restored.getOriginalName()).isEqualTo("free.txt");
+        assertThat(restored.getDisplayName()).isEqualTo("free.txt");
+    }
+
+    @Test
+    void restoreIsJudgedOnRelativePathToo() throws Exception {
+        Document trashed = saveDocument("officer-a", rootFolderId, "same.txt");
+        trashed.setRelativePath("dirA");
+        documentRepository.save(trashed);
+        trashViaHttp("officer-a", trashed.getId());
+        Document other = saveDocument("officer-a", rootFolderId, "same.txt"); // same name, path "" -> no clash
+        assertThat(other.getRelativePath()).isEmpty();
+
+        mockMvc.perform(post("/trash/" + trashed.getId() + "/restore")
+                        .with(officer("officer-a"))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk());
     }
 
     // ---- AC-7/AC-8: đang purging / đã quá hạn (đã purge) ------------------------

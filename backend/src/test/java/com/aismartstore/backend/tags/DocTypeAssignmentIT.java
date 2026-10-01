@@ -242,7 +242,8 @@ class DocTypeAssignmentIT {
 
     private void uploadPng(String batchId, String filename) throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", filename, "image/png", PNG_BYTES);
-        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(file).with(officer()))
+        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(file)
+                .param("displayName", filename).with(officer()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("INGESTED"));
     }

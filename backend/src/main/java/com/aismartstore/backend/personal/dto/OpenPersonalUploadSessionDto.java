@@ -7,11 +7,13 @@ import java.util.UUID;
 /**
  * POST /personal/batches/{batchId}/upload-sessions body
  * (chunked-file-upload-02-personal-chunked-upload.md §2.4/§3). No
- * {@code relativePath}/{@code note} - personal storage has no equivalent
- * concept for either (unlike the ingest counterpart, {@code InitUploadSessionDto}).
+ * {@code note} - personal storage has no equivalent concept. SPEC-folder-upload-display-name
+ * adds {@code displayName} + {@code relativePath} (folder-drop keeps its sub-path).
  */
 public record OpenPersonalUploadSessionDto(
         @NotBlank String originalName,
+        String displayName,
+        String relativePath,
         @Positive long declaredSizeBytes,
         UUID folderId,
         String mimeType) {

@@ -109,7 +109,19 @@ class AuditInstrumentationCoverageTest {
                     + "a documentIds array (too large for a query string), not because it mutates "
                     + "anything - it only reads document_group_share counts to help the FE warn the user "
                     + "before they confirm POST /documents/trash (which IS audited, per document, via "
-                    + "TrashService#trash). No state changes here, so no audit signal to record."));
+                    + "TrashService#trash). No state changes here, so no audit signal to record.",
+            "IngestController#nameCheck",
+            "SPEC-folder-upload-display-name BE-5: a POST only because the body carries up to 1000 file names; "
+                    + "read-only lookup of which names are taken (no state change, no file content, names are "
+                    + "not logged). Rate limited to 30/min/user; the uploads that follow are audited per file.",
+            "IngestController#fromPersonalNameCheck",
+            "SPEC-folder-upload-display-name BE-5: a POST only because the body carries up to 1000 file names; "
+                    + "read-only lookup of which names are taken (no state change, no file content, names are "
+                    + "not logged). Rate limited to 30/min/user; the uploads that follow are audited per file.",
+            "PersonalController#nameCheck",
+            "SPEC-folder-upload-display-name BE-5: a POST only because the body carries up to 1000 file names; "
+                    + "read-only lookup of which names are taken (no state change, no file content, names are "
+                    + "not logged). Rate limited to 30/min/user; the uploads that follow are audited per file."));
 
     @Test
     void everyMutatingRestEndpointEitherAuditsOrIsExplicitlyAllowlisted() throws IOException {

@@ -323,7 +323,7 @@ public class AccountsService {
             throw new BadRequestException("Trạng thái không hợp lệ: " + status);
         }
         boolean active = "active".equals(status);
-        if (dto.reason() == null || dto.reason().isBlank()) {
+        if (!active && (dto.reason() == null || dto.reason().isBlank())) {
             throw new BadRequestException("Cần nêu lý do khi thay đổi trạng thái tài khoản");
         }
 

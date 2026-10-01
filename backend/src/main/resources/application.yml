@@ -77,6 +77,9 @@ spring:
     virtual-host: /
 
 app:
+  name-check:
+    # folder-upload-display-name BE-6: gioi han in-memory theo (sub, endpoint), cua so 1 phut.
+    rate-limit-per-minute: ${NAME_CHECK_RATE_LIMIT_PER_MINUTE:30}
   search-index:
     # search-fulltext-04-dong-bo-chi-muc.md muc 4.2 (da co san, khai bao tuong
     # minh o day de 3 tham so cua indexer nam canh nhau).

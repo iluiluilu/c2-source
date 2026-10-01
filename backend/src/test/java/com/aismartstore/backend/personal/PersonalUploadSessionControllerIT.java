@@ -210,6 +210,7 @@ class PersonalUploadSessionControllerIT {
             throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("originalName", originalName);
+        body.put("displayName", originalName);
         body.put("declaredSizeBytes", declaredSizeBytes);
         body.put("folderId", folderId);
         body.put("mimeType", "text/plain");
@@ -307,6 +308,7 @@ class PersonalUploadSessionControllerIT {
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "originalName", "w.png",
+                                "displayName", "w.png",
                                 "relativePath", "",
                                 "declaredSizeBytes", warehousePayload.length,
                                 "mimeType", "image/png"))))

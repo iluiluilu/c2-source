@@ -242,7 +242,8 @@ class DigitizationDispatchIT {
     private UUID uploadFile(String batchId, String filename, String contentType, byte[] bytes) throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", filename, contentType, bytes);
         String json = mockMvc.perform(
-                        multipart("/ingest/batches/" + batchId + "/files").file(file).with(officer()))
+                        multipart("/ingest/batches/" + batchId + "/files").file(file)
+                                .param("displayName", filename).with(officer()))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()

@@ -64,7 +64,8 @@ class PersonalToWarehouseServiceTest {
         service = new PersonalToWarehouseService(
                 fileRepository, folderRepository, itemRepository, mock(UploadBatchRepository.class),
                 uploadBatchService, warehouseService, mock(WarehouseCapacityService.class), allowlistService,
-                mock(DocumentRepository.class), mock(AuditService.class), mock(PersonalIngestWorker.class),
+                mock(DocumentRepository.class), mock(com.aismartstore.backend.displayname.NameCheckRepository.class),
+                mock(AuditService.class), mock(PersonalIngestWorker.class),
                 mock(PlatformTransactionManager.class), 30);
 
         when(folderRepository.findAllByOwnerSubOrderByNameAsc("u1")).thenAnswer(i -> folders);
@@ -183,7 +184,8 @@ class PersonalToWarehouseServiceTest {
 
         // 3 eligible > max 2 -> 400 even though 2 more files are ineligible.
         FromPersonalDto dto = new FromPersonalDto(
-                UUID.randomUUID(), null, List.of(p1.getId(), p2.getId(), p3.getId(), exe.getId(), huge.getId()), List.of());
+                UUID.randomUUID(), null, List.of(p1.getId(), p2.getId(), p3.getId(), exe.getId(), huge.getId()), List.of(),
+                names(p1, p2, p3, exe, huge));
         assertThatThrownBy(() -> service.start(USER, dto))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.getStatus().value()).isEqualTo(400);
@@ -199,10 +201,17 @@ class PersonalToWarehouseServiceTest {
         PersonalFile exe = file("virus.exe", null, 10);
         when(allowlistService.isAllowedByNameAndMime(anyString(), anyString())).thenReturn(false);
 
-        FromPersonalDto dto = new FromPersonalDto(UUID.randomUUID(), null, List.of(exe.getId()), List.of());
+        FromPersonalDto dto = new FromPersonalDto(UUID.randomUUID(), null, List.of(exe.getId()), List.of(), names(exe));
         assertThatThrownBy(() -> service.start(USER, dto))
                 .isInstanceOfSatisfying(ApiException.class, e ->
                         assertThat(((Map<?, ?>) e.getBody()).get("code")).isEqualTo("NO_ELIGIBLE_FILES"));
+    }
+
+    /** Display names equal to the original names (the "no clash" case of SPEC-folder-upload-display-name). */
+    private static List<FromPersonalDto.DisplayNameEntry> names(PersonalFile... files) {
+        return java.util.Arrays.stream(files)
+                .map(f -> new FromPersonalDto.DisplayNameEntry(f.getId(), f.getOriginalName()))
+                .toList();
     }
 
     @Test
@@ -210,9 +219,9 @@ class PersonalToWarehouseServiceTest {
         when(warehouseService.folderExists(any())).thenReturn(false);
         PersonalFile f = file("a.png", null, 1);
 
-        assertThatThrownBy(() -> service.start(USER, new FromPersonalDto(UUID.randomUUID(), null, List.of(f.getId()), List.of())))
+        assertThatThrownBy(() -> service.start(USER, new FromPersonalDto(UUID.randomUUID(), null, List.of(f.getId()), List.of(), null)))
                 .isInstanceOf(NotFoundException.class);
-        assertThatThrownBy(() -> service.start(USER, new FromPersonalDto(UUID.randomUUID(), null, List.of(), List.of())))
+        assertThatThrownBy(() -> service.start(USER, new FromPersonalDto(UUID.randomUUID(), null, List.of(), List.of(), null)))
                 .isInstanceOf(com.aismartstore.backend.common.BadRequestException.class);
     }
 

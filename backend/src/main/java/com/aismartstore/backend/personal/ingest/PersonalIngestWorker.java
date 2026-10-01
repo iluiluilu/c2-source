@@ -120,19 +120,15 @@ public class PersonalIngestWorker {
                 () -> objectStorageService.getObject(file.getStorageKey(), personalBucket),
                 item.getRelativePath(),
                 file.getSha256(),
-                file.getId());
+                file.getId(),
+                item.getDisplayName());
 
         try {
             IngestOutcome outcome = documentsService.ingestCore(user, batch, source, note);
-            if (outcome instanceof IngestOutcome.Skipped skipped) {
-                finish(user, targetFolderId, item, PersonalIngestItem.SKIPPED, skipped.reason(),
-                        skipped.documentId(), null, file.getSize());
-            } else {
-                IngestOutcome.Ingested ingested = (IngestOutcome.Ingested) outcome;
-                UUID[] dups = ingested.duplicateOf().stream().map(Document::getId).toArray(UUID[]::new);
-                finish(user, targetFolderId, item, PersonalIngestItem.INGESTED, null,
-                        ingested.document().getId(), dups, file.getSize());
-            }
+            IngestOutcome.Ingested ingested = (IngestOutcome.Ingested) outcome;
+            UUID[] dups = ingested.duplicateOf().stream().map(Document::getId).toArray(UUID[]::new);
+            finish(user, targetFolderId, item, PersonalIngestItem.INGESTED, null,
+                    ingested.document().getId(), dups, file.getSize());
         } catch (ApiException e) {
             finish(user, targetFolderId, item, PersonalIngestItem.FAILED, codeOf(e), null, null, file.getSize());
         } catch (NoSuchKeyException e) {

@@ -255,6 +255,7 @@ class UploadSessionControllerIT {
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "originalName", originalName,
+                                "displayName", originalName,
                                 "relativePath", "",
                                 "declaredSizeBytes", declaredSizeBytes,
                                 "mimeType", "image/png"))))
@@ -339,6 +340,69 @@ class UploadSessionControllerIT {
                 .andExpect(jsonPath("$.status").value("INGESTED"));
 
         assertThat(documentRepository.findAll()).hasSize(1);
+    }
+
+    // ---- SPEC-folder-upload-display-name: 409 at complete keeps the session (AC-14/AC-15) ------
+
+    @Test
+    void completeWithATakenDisplayNameIs409KeepsTheSessionAndACommitAgainNeedsNoNewChunks() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+        byte[] payload = pngPayload(18);
+
+        // first file takes the name
+        String firstSession = (String) initSession(batchId, "a.png", payload.length).get("sessionId");
+        uploadAllChunks(firstSession, payload, 8, officer());
+        mockMvc.perform(post("/upload-sessions/" + firstSession + "/complete").with(officer()))
+                .andExpect(status().isCreated());
+
+        // second one wants the same display name -> 409 at complete
+        String sessionId = (String) initSession(batchId, "a.png", payload.length).get("sessionId");
+        uploadAllChunks(sessionId, payload, 8, officer());
+        mockMvc.perform(post("/upload-sessions/" + sessionId + "/complete").with(officer()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_CONFLICT"));
+        assertThat(documentRepository.findAll()).hasSize(1);
+        // the session is still OPEN with all bytes received
+        mockMvc.perform(get("/upload-sessions/" + sessionId).with(officer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OPEN"))
+                .andExpect(jsonPath("$.receivedBytes").value(payload.length));
+
+        // an invalid regenerated name is a 422 and still keeps the session
+        mockMvc.perform(post("/upload-sessions/" + sessionId + "/complete").with(officer())
+                        .contentType("application/json").content("{\"displayName\":\"other.png\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("INVALID_DISPLAY_NAME"));
+
+        // commit again with a fresh suffix, no chunk re-sent
+        String suffixed = "a_20260930101530123-ab12cd.png";
+        mockMvc.perform(post("/upload-sessions/" + sessionId + "/complete").with(officer())
+                        .contentType("application/json").content("{\"displayName\":\"" + suffixed + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.document.displayName").value(suffixed));
+        assertThat(documentRepository.findAll()).hasSize(2);
+    }
+
+    @Test
+    void initRejectsAnOverlongOriginalNameBeforeAnyChunkAndABadDisplayName() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+
+        String tooLong = "a".repeat(509) + ".png"; // 513 code points
+        mockMvc.perform(post("/ingest/batches/" + batchId + "/upload-sessions")
+                        .with(officer()).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "originalName", tooLong, "displayName", tooLong, "declaredSizeBytes", 10))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.reason").value("ORIGINAL_NAME_TOO_LONG"));
+
+        mockMvc.perform(post("/ingest/batches/" + batchId + "/upload-sessions")
+                        .with(officer()).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "originalName", "a.png", "displayName", "b/c.png", "declaredSizeBytes", 10))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.reason").value("FORBIDDEN_CHAR"));
     }
 
     // ---- AC-5/AC-6: malware detected on the assembled file -----------------------

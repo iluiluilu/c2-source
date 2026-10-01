@@ -58,9 +58,11 @@ import org.springframework.web.bind.annotation.RestController;
  * digitization-review-04-sed-summary.md §3/§4 (Story 9-10): the review queue
  * + one run's detail + edit/confirm actions for {@code task ∈ {ocr, stt, sed,
  * video_summary}}. Every endpoint requires {@code
- * PERM_digitization_review.manage} (V28, role {@code CAN_BO}) plus an
+ * PERM_digitization_review.manage} (V28) plus an
  * explicit "chính chủ" check in this controller (Quyết định 5 SA) - the
- * permission alone is only a necessary condition.
+ * permission alone is only a necessary condition. Mặc định {@code CAN_BO} +
+ * {@code LANH_DAO} (R2, cấp qua V35__r2_business_parity.sql); {@code
+ * QUAN_TRI} (R3) chỉnh được qua màn RBAC.
  */
 @RestController
 @RequestMapping("/digitization-review")

@@ -18,8 +18,9 @@ import jakarta.validation.constraints.Size;
  * chunked upload.
  */
 public record InitUploadSessionDto(
-        @NotBlank @Size(max = 1024) String originalName,
-        @Size(max = 1024) String relativePath,
+        @NotBlank @Size(max = 4096) String originalName,
+        @Size(max = 4096) String relativePath,
+        @Size(max = 4096) String displayName,
         @NotNull @Min(1) Long declaredSizeBytes,
         String mimeType,
         @Size(max = NoteConstraints.NOTE_MAX_LENGTH) String note) {

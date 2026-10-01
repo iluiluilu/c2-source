@@ -4,6 +4,7 @@ import com.aismartstore.backend.audit.AuditRequestContext;
 import com.aismartstore.backend.audit.AuditService;
 import com.aismartstore.backend.auth.KeycloakUser;
 import com.aismartstore.backend.common.ApiException;
+import com.aismartstore.backend.displayname.DisplayNameValidator;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentsService;
 import com.aismartstore.backend.documents.IngestOutcome;
@@ -93,6 +94,10 @@ public class UploadSessionService {
             throw batchNotFound();
         }
 
+        // AC-28: reject over-long original_name / bad display_name BEFORE any chunk is accepted.
+        String relativePath = DisplayNameValidator.normalizeRelativePath(dto.relativePath());
+        DisplayNameValidator.validate(dto.originalName(), dto.displayName());
+
         long maxFileSizeBytes = systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES);
         if (dto.declaredSizeBytes() > maxFileSizeBytes) {
             throw fileTooLarge(maxFileSizeBytes);
@@ -106,7 +111,8 @@ public class UploadSessionService {
         UploadSession session = new UploadSession();
         session.setBatchId(batchId);
         session.setOriginalName(dto.originalName());
-        session.setRelativePath(dto.relativePath() == null ? "" : dto.relativePath());
+        session.setDisplayName(dto.displayName());
+        session.setRelativePath(relativePath);
         session.setDeclaredSizeBytes(dto.declaredSizeBytes());
         session.setReceivedBytes(0);
         session.setChunkSizeBytes(chunkSizeBytes);
@@ -149,6 +155,8 @@ public class UploadSessionService {
         if (dto.folderId() != null) {
             personalService.assertOwnedFolder(user, dto.folderId());
         }
+        String relativePath = DisplayNameValidator.normalizeRelativePath(dto.relativePath());
+        DisplayNameValidator.validate(dto.originalName(), dto.displayName());
 
         long maxFileSizeBytes = systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES);
         if (dto.declaredSizeBytes() > maxFileSizeBytes) {
@@ -163,7 +171,8 @@ public class UploadSessionService {
         UploadSession session = new UploadSession();
         session.setBatchId(batch.getId());
         session.setOriginalName(dto.originalName());
-        session.setRelativePath("");
+        session.setDisplayName(dto.displayName());
+        session.setRelativePath(relativePath);
         session.setDeclaredSizeBytes(dto.declaredSizeBytes());
         session.setReceivedBytes(0);
         session.setChunkSizeBytes(chunkSizeBytes);
@@ -273,6 +282,15 @@ public class UploadSessionService {
      * below runs as its own small auto-committed writes instead.
      */
     public CompleteResult complete(KeycloakUser user, UUID sessionId) {
+        return complete(user, sessionId, null);
+    }
+
+    /**
+     * {@code displayNameOverride}: a regenerated name after {@code 409 DISPLAY_NAME_CONFLICT}. Both that
+     * 409 and a bad override ({@code 422 INVALID_DISPLAY_NAME}) leave the session OPEN with its temp
+     * file intact, so the client can commit again without re-sending any chunk.
+     */
+    public CompleteResult complete(KeycloakUser user, UUID sessionId, String displayNameOverride) {
         UploadSession session = requireOwned(user, sessionId);
 
         if (UploadSessionStatus.COMPLETED.equals(session.getStatus())) {
@@ -291,7 +309,12 @@ public class UploadSessionService {
         UploadBatch batch = uploadBatchService.loadOpenBatch(session.getBatchId());
 
         Path tempFile = Path.of(session.getTempFilePath());
+        boolean keepSession = false;
         try {
+            if (displayNameOverride != null) {
+                DisplayNameValidator.validate(session.getOriginalName(), displayNameOverride);
+                session.setDisplayName(displayNameOverride);
+            }
             CompleteResult result = switch (batch.getKind()) {
                 case WAREHOUSE -> completeWarehouse(user, session, tempFile);
                 case PERSONAL -> completePersonal(user, session, tempFile);
@@ -302,6 +325,14 @@ public class UploadSessionService {
             uploadSessionRepository.save(session);
             return result;
         } catch (ApiException e) {
+            if (isRetryableNameError(e)) {
+                keepSession = true;
+                if (displayNameOverride != null && e.getStatus() == HttpStatus.CONFLICT) {
+                    session.setUpdatedAt(OffsetDateTime.now());
+                    uploadSessionRepository.save(session);
+                }
+                throw e;
+            }
             // A recognized business rejection (format/malware/size/scanner) -
             // the file "was processed", it just didn't make it in. Store enough
             // to replay the same rejection later (§4.4 step 7) instead of
@@ -328,33 +359,34 @@ public class UploadSessionService {
             uploadSessionRepository.save(session);
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to complete upload session");
         } finally {
-            deleteQuietly(tempFile);
+            if (!keepSession) {
+                deleteQuietly(tempFile);
+            }
         }
+    }
+
+    private static boolean isRetryableNameError(ApiException e) {
+        if (e.getBody() instanceof Map<?, ?> map) {
+            Object code = map.get("code");
+            return "DISPLAY_NAME_CONFLICT".equals(code) || DisplayNameValidator.CODE.equals(code);
+        }
+        return false;
     }
 
     private CompleteResult completeWarehouse(KeycloakUser user, UploadSession session, Path tempFile) {
         PathMultipartFile wrapped =
                 new PathMultipartFile(tempFile, session.getOriginalName(), session.getDeclaredMimeType());
         IngestOutcome outcome = documentsService.ingestBatchFile(
-                user, session.getBatchId(), wrapped, session.getRelativePath(), session.getNote());
+                user, session.getBatchId(), wrapped, session.getRelativePath(), session.getDisplayName(),
+                session.getNote());
 
-        Map<String, Object> rawBody;
-        int httpStatus;
-        if (outcome instanceof IngestOutcome.Skipped skipped) {
-            rawBody = new LinkedHashMap<>();
-            rawBody.put("status", "SKIPPED");
-            rawBody.put("reason", skipped.reason());
-            rawBody.put("documentId", skipped.documentId());
-            httpStatus = HttpStatus.OK.value();
-        } else {
-            IngestOutcome.Ingested ingested = (IngestOutcome.Ingested) outcome;
-            Document document = ingested.document();
-            rawBody = new LinkedHashMap<>();
-            rawBody.put("status", "INGESTED");
-            rawBody.put("document", document);
-            rawBody.put("duplicateOf", ingested.duplicateOf().stream().map(Document::getId).toList());
-            httpStatus = HttpStatus.CREATED.value();
-        }
+        IngestOutcome.Ingested ingested = (IngestOutcome.Ingested) outcome;
+        Document document = ingested.document();
+        Map<String, Object> rawBody = new LinkedHashMap<>();
+        rawBody.put("status", "INGESTED");
+        rawBody.put("document", document);
+        rawBody.put("duplicateOf", ingested.duplicateOf().stream().map(Document::getId).toList());
+        int httpStatus = HttpStatus.CREATED.value();
         // Normalize to plain JSON-compatible types (String/Number/Map/List)
         // before it is handed to Hibernate's JSONB writer/stored on the
         // entity, so replay (§4.4 step 2) returns exactly the same shape
@@ -373,7 +405,8 @@ public class UploadSessionService {
         PathMultipartFile wrapped =
                 new PathMultipartFile(tempFile, session.getOriginalName(), session.getDeclaredMimeType());
         PersonalFile saved = personalService.uploadFileInBatch(
-                user, session.getBatchId(), session.getTargetPersonalFolderId(), wrapped);
+                user, session.getBatchId(), session.getTargetPersonalFolderId(), wrapped, session.getRelativePath(),
+                session.getDisplayName());
 
         Map<String, Object> rawBody = new LinkedHashMap<>();
         rawBody.put("status", "STORED");
@@ -397,8 +430,7 @@ public class UploadSessionService {
             int httpStatus = body.get("httpStatus") instanceof Number n ? n.intValue() : 422;
             throw new ApiException(HttpStatus.valueOf(httpStatus), errorBody, String.valueOf(body.get("message")));
         }
-        int httpStatus = "SKIPPED".equals(body.get("status")) ? HttpStatus.OK.value() : HttpStatus.CREATED.value();
-        return new CompleteResult(httpStatus, body);
+        return new CompleteResult(HttpStatus.CREATED.value(), body);
     }
 
     @SuppressWarnings("unchecked")

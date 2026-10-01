@@ -10,6 +10,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -235,8 +236,14 @@ class IngestControllerIT {
     }
 
     private String openBatch(UUID folderId, int declaredFileCount, long declaredTotalBytes) throws Exception {
+        return openBatchAs(officer(), folderId, declaredFileCount, declaredTotalBytes);
+    }
+
+    /** Same as {@link #openBatch}, parameterized by role (SPEC-r2-business-parity-01 AC-8: R2 same limits as R1). */
+    private String openBatchAs(JwtRequestPostProcessor role, UUID folderId, int declaredFileCount, long declaredTotalBytes)
+            throws Exception {
         String json = mockMvc.perform(post("/ingest/batches")
-                        .with(officer())
+                        .with(role)
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "targetFolderId", folderId,
@@ -253,12 +260,24 @@ class IngestControllerIT {
 
     private org.springframework.test.web.servlet.ResultActions uploadPng(
             String batchId, String filename, String relativePath) throws Exception {
+        return uploadPng(batchId, filename, relativePath, filename);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions uploadPng(
+            String batchId, String filename, String relativePath, String displayName) throws Exception {
+        return uploadPngAs(officer(), batchId, filename, relativePath, displayName);
+    }
+
+    /** Same as {@link #uploadPng}, parameterized by role (SPEC-r2-business-parity-01 AC-8: R2 same limits as R1). */
+    private org.springframework.test.web.servlet.ResultActions uploadPngAs(
+            JwtRequestPostProcessor role, String batchId, String filename, String relativePath, String displayName)
+            throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", filename, "image/png", PNG_BYTES);
-        var request = multipart("/ingest/batches/" + batchId + "/files").file(file);
+        var request = multipart("/ingest/batches/" + batchId + "/files").file(file).param("displayName", displayName);
         if (relativePath != null) {
             request.param("relativePath", relativePath);
         }
-        return mockMvc.perform(request.with(officer()));
+        return mockMvc.perform(request.with(role));
     }
 
     // ---- Story 2 AC-3: declared-limit pre-check at open -----------------------
@@ -279,6 +298,24 @@ class IngestControllerIT {
         assertThat(uploadBatchRepository.findAll()).isEmpty();
     }
 
+    // SPEC-r2-business-parity-01 AC-8 (R-6): R2 (LANH_DAO) hits the exact same
+    // batch-limit error as R1 - the limit is per-batch, not per-role.
+    @Test
+    void leaderOpenBatchAboveDeclaredFileCountLimitGetsTheSameErrorAsOfficer() throws Exception {
+        UUID folderId = createFolder("Root");
+        setConfig("ingest.max_files_per_batch", 1);
+
+        mockMvc.perform(post("/ingest/batches")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("targetFolderId", folderId, "declaredFileCount", 2, "declaredTotalBytes", 100))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BATCH_LIMIT_EXCEEDED"));
+
+        assertThat(uploadBatchRepository.findAll()).isEmpty();
+    }
+
     // ---- Story 1/2 AC-2: one bad file does not block the rest -----------------
 
     @Test
@@ -288,7 +325,8 @@ class IngestControllerIT {
 
         MockMultipartFile badFile = new MockMultipartFile("file", "virus.exe", "application/x-msdownload",
                 "not a real exe".getBytes());
-        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(badFile).with(officer()))
+        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(badFile)
+                        .param("displayName", "virus.exe").with(officer()))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("INVALID_FORMAT"));
 
@@ -334,25 +372,224 @@ class IngestControllerIT {
         uploadPng(batchId, "b.png", null)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("WAREHOUSE_CAPACITY_EXCEEDED"));
+    }
+
+    // SPEC-r2-business-parity-01 AC-8 (R-6): same warehouse-capacity check for
+    // a batch opened by R2 (LANH_DAO) - capacity is global, not per-role.
+    @Test
+    void leaderWarehouseCapacityBlockedGetsTheSameErrorAsOfficer() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatchAs(leader(), folderId, 5, 1_000_000);
+
+        uploadPngAs(leader(), batchId, "a.png", null, "a.png").andExpect(status().isCreated());
+
+        Warehouse warehouse = warehouseRepository.findById(WarehouseRepository.SINGLETON_ID).orElseThrow();
+        warehouse.setMaxCapacityBytes(1); // now far over the 95% block threshold
+        warehouseRepository.save(warehouse);
+
+        uploadPngAs(leader(), batchId, "b.png", null, "b.png")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("WAREHOUSE_CAPACITY_EXCEEDED"));
 
         assertThat(documentRepository.findAll()).hasSize(1);
     }
 
-    // ---- Story 4 AC-2: re-upload dedup ------------------------------------------
+    // ---- SPEC-folder-upload-display-name: no dedup by name, unique display_name ----------
 
     @Test
-    void reuploadOfAnExistingCleanDocumentIsSkipped() throws Exception {
+    void reuploadWithTheSameDisplayNameIsAConflictNotASkip() throws Exception {
         UUID folderId = createFolder("Root");
         String batchId = openBatch(folderId, 5, 1_000_000);
 
         uploadPng(batchId, "a.png", null).andExpect(status().isCreated());
 
-        uploadPng(batchId, "a.png", null)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SKIPPED"))
-                .andExpect(jsonPath("$.reason").value("ALREADY_EXISTS"));
+        uploadPng(batchId, "A.PNG", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_CONFLICT"));
 
         assertThat(documentRepository.findAll()).hasSize(1);
+        // the reservation of the failed attempt was given back
+        mockMvc.perform(get("/ingest/batches/" + batchId).with(officer()))
+                .andExpect(jsonPath("$.actualFileCount").value(1));
+    }
+
+    @Test
+    void reuploadWithASuffixedDisplayNameCreatesANewCopy() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+
+        uploadPng(batchId, "a.png", null).andExpect(status().isCreated());
+        uploadPng(batchId, "a.png", null, "a_20260930101530123-ab12cd.png")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("INGESTED"))
+                .andExpect(jsonPath("$.document.displayName").value("a_20260930101530123-ab12cd.png"))
+                .andExpect(jsonPath("$.document.originalName").value("a.png"))
+                .andExpect(jsonPath("$.document.storageKey").doesNotExist());
+
+        assertThat(documentRepository.findAll()).hasSize(2);
+    }
+
+    @Test
+    void sameNameInADifferentRelativePathIsNotAConflict() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+
+        uploadPng(batchId, "a.png", "dirA").andExpect(status().isCreated());
+        uploadPng(batchId, "a.png", "dirB").andExpect(status().isCreated());
+        uploadPng(batchId, "a.png", "dirA").andExpect(status().isConflict());
+    }
+
+    @Test
+    void invalidDisplayNameIsRejectedWith422AndReason() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+
+        uploadPng(batchId, "a.png", null, "other.png")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("INVALID_DISPLAY_NAME"))
+                .andExpect(jsonPath("$.reason").value("SUFFIX_MISMATCH"));
+        // missing displayName (old client) -> 422 EMPTY
+        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files")
+                        .file(new MockMultipartFile("file", "a.png", "image/png", PNG_BYTES))
+                        .with(officer()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.reason").value("EMPTY"));
+        assertThat(documentRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    void nameCheckReportsTakenNamesInOrderIgnoringCaseAndTrash() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+        uploadPng(batchId, "a.png", "dir").andExpect(status().isCreated());
+        uploadPng(batchId, "gone.png", "dir").andExpect(status().isCreated());
+        Document gone = documentRepository.findAll().stream()
+                .filter(d -> "gone.png".equals(d.getOriginalName())).findFirst().orElseThrow();
+        gone.setDeletedAt(java.time.OffsetDateTime.now());
+        documentRepository.save(gone);
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "folderId", folderId.toString(),
+                "files", java.util.List.of(
+                        Map.of("relativePath", "dir", "originalName", "A.PNG"),
+                        Map.of("relativePath", "dir", "originalName", "new.png"),
+                        Map.of("relativePath", "other", "originalName", "a.png"),
+                        Map.of("relativePath", "dir", "originalName", "gone.png"))));
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(officer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].taken").value(true))
+                .andExpect(jsonPath("$[1].taken").value(false))
+                .andExpect(jsonPath("$[2].taken").value(false))
+                .andExpect(jsonPath("$[3].taken").value(false));
+    }
+
+    @Test
+    void nameCheckRejectsMoreThan1000FilesAndUnknownFolder() throws Exception {
+        UUID folderId = createFolder("Root");
+        java.util.List<Map<String, String>> files = new java.util.ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            files.add(Map.of("relativePath", "", "originalName", "f" + i));
+        }
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("folderId", folderId.toString(), "files", files)))
+                        .with(officer()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("folderId", UUID.randomUUID().toString(), "files", java.util.List.of())))
+                        .with(officer()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void nameCheckIsRateLimitedPerUserAndEndpointWith429() throws Exception {
+        UUID folderId = createFolder("Root");
+        String body = objectMapper.writeValueAsString(Map.of("folderId", folderId.toString(), "files", java.util.List.of()));
+        var otherOfficer = asRole("rate-limited-officer", "can-bo", "CAN_BO");
+        for (int i = 0; i < 30; i++) {
+            mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(otherOfficer))
+                    .andExpect(status().isOk());
+        }
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(otherOfficer))
+                .andExpect(status().isTooManyRequests());
+        // another user is not affected
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(officer()))
+                .andExpect(status().isOk());
+    }
+
+    // r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has document.upload
+    // too (SPEC-r2-business-parity-01 AC-1, R-7) - only QUAN_TRI (R3) still
+    // lacks it, so that is the role that proves the permission gate still works.
+    @Test
+    void nameCheckRequiresTheUploadPermission() throws Exception {
+        UUID folderId = createFolder("Root");
+        String body = objectMapper.writeValueAsString(Map.of("folderId", folderId.toString(), "files", java.util.List.of()));
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(admin()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void leaderHasTheUploadPermissionOnNameCheck() throws Exception {
+        UUID folderId = createFolder("Root");
+        String body = objectMapper.writeValueAsString(Map.of("folderId", folderId.toString(), "files", java.util.List.of()));
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(leader()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void aFileFlaggedInfectedStillHoldsItsNameButARejectedFormatDoesNot() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+
+        when(clamdService.scanStream(any())).thenReturn(ClamdService.ScanVerdict.infected("Eicar"));
+        uploadPng(batchId, "virus.png", null).andExpect(status().isUnprocessableEntity());
+        when(clamdService.scanStream(any())).thenReturn(ClamdService.ScanVerdict.ofClean());
+
+        MockMultipartFile bad = new MockMultipartFile("file", "bad.exe", "application/x-msdownload", "x".getBytes());
+        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(bad)
+                        .param("displayName", "bad.exe").with(officer()))
+                .andExpect(status().isUnprocessableEntity());
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "folderId", folderId.toString(),
+                "files", java.util.List.of(
+                        Map.of("relativePath", "", "originalName", "virus.png"),
+                        Map.of("relativePath", "", "originalName", "bad.exe"))));
+        mockMvc.perform(post("/ingest/name-check").contentType("application/json").content(body).with(officer()))
+                .andExpect(jsonPath("$[0].taken").value(true))   // infected row keeps the name (Q3)
+                .andExpect(jsonPath("$[1].taken").value(false)); // rejected evidence row does not
+        uploadPng(batchId, "virus.png", null).andExpect(status().isConflict());
+    }
+
+    @Test
+    void nameOf512CodePointsInAPathOf1024CodePointsIsAcceptedAndStillUnique() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+        String name = "Ệ".repeat(508) + ".png"; // 512 code points, Vietnamese (multi-byte)
+        String path = ("d".repeat(31) + "/").repeat(32).substring(0, 1024); // 1024 chars
+
+        uploadPng(batchId, name, path).andExpect(status().isCreated());
+        uploadPng(batchId, name, path).andExpect(status().isConflict());
+        uploadPng(batchId, "x" + name.substring(1), path).andExpect(status().isCreated());
+
+        String tooLongPath = path + "e";
+        uploadPng(batchId, "p.png", tooLongPath).andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void contentDispositionUsesOriginalNameAndNotDisplayName() throws Exception {
+        UUID folderId = createFolder("Root");
+        String batchId = openBatch(folderId, 5, 1_000_000);
+        uploadPng(batchId, "a.png", null).andExpect(status().isCreated());
+        uploadPng(batchId, "a.png", null, "a_20260930101530123-ab12cd.png").andExpect(status().isCreated());
+        Document copy = documentRepository.findAll().stream()
+                .filter(d -> d.getDisplayName().contains("_2026")).findFirst().orElseThrow();
+        when(objectStorageService.getObject(anyString())).thenReturn(new software.amazon.awssdk.core.ResponseInputStream<>(
+                software.amazon.awssdk.services.s3.model.GetObjectResponse.builder().build(),
+                software.amazon.awssdk.http.AbortableInputStream.create(new java.io.ByteArrayInputStream(PNG_BYTES))));
+        mockMvc.perform(get("/documents/" + copy.getId() + "/content").with(officer()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", "attachment; filename*=UTF-8''a.png"));
     }
 
     @Test
@@ -362,7 +599,8 @@ class IngestControllerIT {
 
         MockMultipartFile badFile =
                 new MockMultipartFile("file", "a.png", "application/x-msdownload", "bad".getBytes());
-        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(badFile).with(officer()))
+        mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files").file(badFile)
+                        .param("displayName", "a.png").with(officer()))
                 .andExpect(status().isUnprocessableEntity());
 
         uploadPng(batchId, "a.png", null)
@@ -468,8 +706,24 @@ class IngestControllerIT {
 
     // ---- RBAC ------------------------------------------------------------------
 
+    // r2-business-parity.md ADR-1 / V35: only QUAN_TRI (R3) lacks
+    // document.upload now - LANH_DAO (R2) is covered by
+    // leaderCanOpenBatchAndReadLimits below (SPEC-r2-business-parity-01 AC-1, R-7).
     @Test
     void nonOfficerIsForbiddenOnIngestEndpoints() throws Exception {
+        UUID folderId = createFolder("Root");
+
+        mockMvc.perform(post("/ingest/batches")
+                        .with(admin())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("targetFolderId", folderId, "declaredFileCount", 1, "declaredTotalBytes", 10))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/ingest/limits").with(admin())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void leaderCanOpenBatchAndReadLimits() throws Exception {
         UUID folderId = createFolder("Root");
 
         mockMvc.perform(post("/ingest/batches")
@@ -477,8 +731,8 @@ class IngestControllerIT {
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(
                                 Map.of("targetFolderId", folderId, "declaredFileCount", 1, "declaredTotalBytes", 10))))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(get("/ingest/limits").with(leader())).andExpect(status().isForbidden());
+                .andExpect(status().isCreated());
+        mockMvc.perform(get("/ingest/limits").with(leader())).andExpect(status().isOk());
     }
 
     @Test

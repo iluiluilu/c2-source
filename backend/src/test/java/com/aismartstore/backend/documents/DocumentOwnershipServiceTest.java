@@ -111,15 +111,44 @@ class DocumentOwnershipServiceTest {
     }
 
     @Test
-    void transferRejectsWhenBLacksCanBoRole() {
+    void transferRejectsWhenBHasNeitherCanBoNorLanhDaoRole() {
+        UUID documentId = UUID.randomUUID();
+        when(documentRepository.findById(documentId)).thenReturn(Optional.of(documentRow(documentId, "user-a")));
+        when(kc.getUser("user-b")).thenReturn(kcUserRep(true));
+        when(kc.listUserRealmRoles("user-b")).thenReturn(List.of(new KcRole("r1", "quan-tri")));
+
+        assertThatThrownBy(() -> service.transfer(documentId, "user-b", null, admin))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Người nhận phải có vai trò Cán bộ (R1) hoặc Lãnh đạo (R2)");
+        verify(documentRepository, never()).save(any());
+    }
+
+    @Test
+    void transferSucceedsWhenBIsAnActiveLanhDaoAccount() {
         UUID documentId = UUID.randomUUID();
         when(documentRepository.findById(documentId)).thenReturn(Optional.of(documentRow(documentId, "user-a")));
         when(kc.getUser("user-b")).thenReturn(kcUserRep(true));
         when(kc.listUserRealmRoles("user-b")).thenReturn(List.of(new KcRole("r1", "lanh-dao")));
 
-        assertThatThrownBy(() -> service.transfer(documentId, "user-b", null, admin))
-                .isInstanceOf(BadRequestException.class);
-        verify(documentRepository, never()).save(any());
+        DocumentOwnershipService.TransferResult result = service.transfer(documentId, "user-b", null, admin);
+
+        assertThat(result.toUploaderSub()).isEqualTo("user-b");
+        ArgumentCaptor<AuditService.AuditEntry> auditCaptor = ArgumentCaptor.forClass(AuditService.AuditEntry.class);
+        verify(auditService).record(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().action()).isEqualTo("document.ownership_transferred");
+    }
+
+    @Test
+    void transferSucceedsWhenBHasQuanTriPlusLanhDaoRoles() {
+        UUID documentId = UUID.randomUUID();
+        when(documentRepository.findById(documentId)).thenReturn(Optional.of(documentRow(documentId, "user-a")));
+        when(kc.getUser("user-b")).thenReturn(kcUserRep(true));
+        when(kc.listUserRealmRoles("user-b"))
+                .thenReturn(List.of(new KcRole("r1", "quan-tri"), new KcRole("r2", "lanh-dao")));
+
+        DocumentOwnershipService.TransferResult result = service.transfer(documentId, "user-b", null, admin);
+
+        assertThat(result.toUploaderSub()).isEqualTo("user-b");
     }
 
     @Test

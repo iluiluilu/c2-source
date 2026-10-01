@@ -259,21 +259,45 @@ class NotesControllerIT {
         return (String) parsed.get("id");
     }
 
-    // ---- R2 (LANH_DAO, không có note.write) -> 403 ------------------------------
+    // ---- r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has note.write
+    // too (SPEC-r2-business-parity-01 AC-1, R-7) - admin (R3) still 403. ------
 
     @Test
-    void postAndPatchByANonOfficerAreForbidden() throws Exception {
+    void postAndPatchByTheLeaderOwnerSucceed() throws Exception {
+        Document document = saveDocument("leader-1");
+
+        String json = mockMvc.perform(post("/documents/" + document.getId() + "/notes")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("body", "ghi chú"))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
+        String noteId = (String) parsed.get("id");
+
+        mockMvc.perform(patch("/documents/" + document.getId() + "/notes/" + noteId)
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("body", "sửa"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void postAndPatchByAdminAreForbidden() throws Exception {
         Document document = saveDocument("officer-1");
 
         mockMvc.perform(post("/documents/" + document.getId() + "/notes")
-                        .with(leader())
+                        .with(admin())
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("body", "ghi chú"))))
                 .andExpect(status().isForbidden());
 
         String noteId = createNote(document.getId(), "ghi chú gốc");
         mockMvc.perform(patch("/documents/" + document.getId() + "/notes/" + noteId)
-                        .with(leader())
+                        .with(admin())
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("body", "sửa"))))
                 .andExpect(status().isForbidden());
@@ -423,6 +447,7 @@ class NotesControllerIT {
         MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", PNG_BYTES);
         mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files")
                         .file(file)
+                        .param("displayName", "a.png")
                         .param("note", tooLongNote)
                         .with(officer()))
                 .andExpect(status().isBadRequest());
@@ -437,6 +462,7 @@ class NotesControllerIT {
         MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", PNG_BYTES);
         mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files")
                         .file(file)
+                        .param("displayName", "a.png")
                         .param("note", "ghi chú lúc nạp")
                         .with(officer()))
                 .andExpect(status().isCreated());

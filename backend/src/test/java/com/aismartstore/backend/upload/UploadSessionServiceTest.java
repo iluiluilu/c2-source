@@ -181,7 +181,7 @@ class UploadSessionServiceTest {
     void initRejectsPersonalBatchWithBatchNotFound() {
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.PERSONAL));
 
-        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", 100L, "text/plain", null);
+        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", "a.txt", 100L, "text/plain", null);
         assertThatThrownBy(() -> service.init(officer, batchId, dto))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("BATCH_NOT_FOUND"));
@@ -193,7 +193,7 @@ class UploadSessionServiceTest {
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
         when(systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES)).thenReturn(100L);
 
-        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", 200L, "text/plain", null);
+        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", "a.txt", 200L, "text/plain", null);
         assertThatThrownBy(() -> service.init(officer, batchId, dto))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("FILE_TOO_LARGE"));
@@ -205,7 +205,7 @@ class UploadSessionServiceTest {
         when(uploadBatchService.loadOpenBatch(batchId))
                 .thenThrow(new ApiException(HttpStatus.CONFLICT, Map.of("code", "BATCH_CLOSED"), "closed"));
 
-        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", 100L, null, null);
+        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "", "a.txt", 100L, null, null);
         assertThatThrownBy(() -> service.init(officer, batchId, dto)).isInstanceOf(ApiException.class);
         verify(uploadSessionRepository, never()).save(any());
     }
@@ -215,7 +215,7 @@ class UploadSessionServiceTest {
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
         when(systemConfigService.getLong(SystemConfigDefaults.UPLOAD_CHUNK_SIZE_BYTES)).thenReturn(1024L);
 
-        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "sub", 500L, "text/plain", "a note");
+        InitUploadSessionDto dto = new InitUploadSessionDto("a.txt", "sub", "a.txt", 500L, "text/plain", "a note");
         UploadSession session = service.init(officer, batchId, dto);
         createdTempFile = Path.of(session.getTempFilePath());
 
@@ -239,7 +239,7 @@ class UploadSessionServiceTest {
         // exact failure mode instead of re-deriving it inside UploadSessionService.
         when(personalService.loadOwnedOpenBatch(officer, batchId)).thenThrow(new NotFoundException("Batch not found"));
 
-        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", 100L, null, "text/plain");
+        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", "a.txt", "", 100L, null, "text/plain");
         assertThatThrownBy(() -> service.initPersonal(officer, batchId, dto)).isInstanceOf(ApiException.class);
         verify(uploadSessionRepository, never()).save(any());
     }
@@ -248,7 +248,7 @@ class UploadSessionServiceTest {
     void initPersonalRejectsABatchOwnedByAnotherUserTheSameWay() {
         when(personalService.loadOwnedOpenBatch(officer, batchId)).thenThrow(new NotFoundException("Batch not found"));
 
-        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", 100L, null, "text/plain");
+        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", "a.txt", "", 100L, null, "text/plain");
         assertThatThrownBy(() -> service.initPersonal(officer, batchId, dto)).isInstanceOf(ApiException.class);
         verify(uploadSessionRepository, never()).save(any());
     }
@@ -261,7 +261,7 @@ class UploadSessionServiceTest {
                 .when(personalService)
                 .assertOwnedFolder(officer, foreignFolderId);
 
-        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", 100L, foreignFolderId, "text/plain");
+        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", "a.txt", "", 100L, foreignFolderId, "text/plain");
         assertThatThrownBy(() -> service.initPersonal(officer, batchId, dto)).isInstanceOf(ApiException.class);
         verify(uploadSessionRepository, never()).save(any());
     }
@@ -271,7 +271,7 @@ class UploadSessionServiceTest {
         when(personalService.loadOwnedOpenBatch(officer, batchId)).thenReturn(batch(BatchKind.PERSONAL));
         when(systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES)).thenReturn(100L);
 
-        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", 200L, null, "text/plain");
+        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", "a.txt", "", 200L, null, "text/plain");
         assertThatThrownBy(() -> service.initPersonal(officer, batchId, dto))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("FILE_TOO_LARGE"));
@@ -288,7 +288,7 @@ class UploadSessionServiceTest {
         when(systemConfigService.getLong(SystemConfigDefaults.UPLOAD_CHUNK_SIZE_BYTES)).thenReturn(1024L);
         UUID folderId = UUID.randomUUID();
 
-        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", 500L, folderId, "text/plain");
+        OpenPersonalUploadSessionDto dto = new OpenPersonalUploadSessionDto("a.txt", "a.txt", "", 500L, folderId, "text/plain");
         UploadSession session = service.initPersonal(officer, batchId, dto);
         createdTempFile = Path.of(session.getTempFilePath());
 
@@ -303,7 +303,7 @@ class UploadSessionServiceTest {
         // AC-7: no quota check at init - only the batch (and folder, if any) lookups.
         verify(personalService, times(1)).loadOwnedOpenBatch(officer, batchId);
         verify(personalService, times(1)).assertOwnedFolder(officer, folderId);
-        verify(personalService, never()).uploadFileInBatch(any(), any(), any(), any());
+        verify(personalService, never()).uploadFileInBatch(any(), any(), any(), any(), any(), any());
         verify(personalService, never()).getQuota(any());
     }
 
@@ -372,7 +372,7 @@ class UploadSessionServiceTest {
         assertThatThrownBy(() -> service.complete(officer, sessionId))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("UPLOAD_SESSION_INCOMPLETE"));
-        verify(documentsService, never()).ingestBatchFile(any(), any(), any(), any(), any());
+        verify(documentsService, never()).ingestBatchFile(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -384,7 +384,7 @@ class UploadSessionServiceTest {
         when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
         long[] observedSize = new long[1];
-        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any()))
+        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     MultipartFile file = invocation.getArgument(2);
                     observedSize[0] = file.getSize(); // captured while the temp file still exists
@@ -399,7 +399,7 @@ class UploadSessionServiceTest {
 
         ArgumentCaptor<MultipartFile> fileCaptor = ArgumentCaptor.forClass(MultipartFile.class);
         verify(documentsService, times(1))
-                .ingestBatchFile(eq(officer), eq(batchId), fileCaptor.capture(), eq("sub/dir"), eq("a note"));
+                .ingestBatchFile(eq(officer), eq(batchId), fileCaptor.capture(), eq("sub/dir"), any(), eq("a note"));
         // NB: size is asserted via the mock answer below, not here - by the
         // time this line runs complete()'s `finally` has already deleted the
         // temp file backing `captured`, so PathMultipartFile#getSize() would
@@ -421,17 +421,17 @@ class UploadSessionServiceTest {
         session.setTargetPersonalFolderId(folderId);
         when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.PERSONAL));
-        when(personalService.uploadFileInBatch(eq(officer), eq(batchId), eq(folderId), any()))
+        when(personalService.uploadFileInBatch(eq(officer), eq(batchId), eq(folderId), any(), any(), any()))
                 .thenReturn(personalFile());
 
         UploadSessionService.CompleteResult result = service.complete(officer, sessionId);
 
         assertThat(result.httpStatus()).isEqualTo(201);
         assertThat(result.body().get("status")).isEqualTo("STORED");
-        verify(personalService, times(1)).uploadFileInBatch(eq(officer), eq(batchId), eq(folderId), any());
+        verify(personalService, times(1)).uploadFileInBatch(eq(officer), eq(batchId), eq(folderId), any(), any(), any());
         // The crux of AC-5: dispatching to the personal branch must NEVER also
         // call the warehouse (ingest) branch's service.
-        verify(documentsService, never()).ingestBatchFile(any(), any(), any(), any(), any());
+        verify(documentsService, never()).ingestBatchFile(any(), any(), any(), any(), any(), any());
         assertThat(session.getStatus()).isEqualTo(UploadSessionStatus.COMPLETED);
     }
 
@@ -440,14 +440,14 @@ class UploadSessionServiceTest {
         UploadSession session = openSession(5, 5, 5, "hello".getBytes(StandardCharsets.UTF_8));
         when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
-        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any()))
+        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new IngestOutcome.Ingested(warehouseDocument(), List.of()));
 
         service.complete(officer, sessionId);
 
         // The other symmetric half of AC-5: dispatching to the warehouse branch
         // must NEVER also call the personal branch's service.
-        verify(personalService, never()).uploadFileInBatch(any(), any(), any(), any());
+        verify(personalService, never()).uploadFileInBatch(any(), any(), any(), any(), any(), any());
     }
 
     // ---- complete quota (chunked-file-upload-02-personal-chunked-upload.md §4.4, AC-7 - bắt buộc) ----
@@ -463,7 +463,7 @@ class UploadSessionServiceTest {
         body.put("code", "QUOTA_EXCEEDED");
         body.put("message", "Vượt hạn mức lưu trữ cá nhân");
         ApiException quotaExceeded = new ApiException(HttpStatus.CONFLICT, body, "Quota exceeded");
-        when(personalService.uploadFileInBatch(any(), any(), any(), any())).thenThrow(quotaExceeded);
+        when(personalService.uploadFileInBatch(any(), any(), any(), any(), any(), any())).thenThrow(quotaExceeded);
 
         // AC-7: quota is only ever evaluated inside this single complete() call
         // (via uploadFileInBatch) - init()/appendChunk() never touch it (see
@@ -475,7 +475,7 @@ class UploadSessionServiceTest {
                     assertThat(((ApiException) ex).getStatus()).isEqualTo(HttpStatus.CONFLICT);
                     assertThat(codeOf(ex)).isEqualTo("QUOTA_EXCEEDED");
                 });
-        verify(personalService, times(1)).uploadFileInBatch(any(), any(), any(), any());
+        verify(personalService, times(1)).uploadFileInBatch(any(), any(), any(), any(), any(), any());
         assertThat(session.getStatus()).isEqualTo(UploadSessionStatus.COMPLETED);
         assertThat(Files.exists(Path.of(session.getTempFilePath()))).isFalse();
 
@@ -484,7 +484,7 @@ class UploadSessionServiceTest {
         assertThatThrownBy(() -> service.complete(officer, sessionId))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("QUOTA_EXCEEDED"));
-        verify(personalService, times(1)).uploadFileInBatch(any(), any(), any(), any());
+        verify(personalService, times(1)).uploadFileInBatch(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -492,7 +492,7 @@ class UploadSessionServiceTest {
         UploadSession session = openSession(5, 5, 5, "hello".getBytes(StandardCharsets.UTF_8));
         when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
         when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
-        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any()))
+        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new IngestOutcome.Ingested(warehouseDocument(), List.of()));
 
         UploadSessionService.CompleteResult first = service.complete(officer, sessionId);
@@ -500,7 +500,7 @@ class UploadSessionServiceTest {
 
         UploadSessionService.CompleteResult second = service.complete(officer, sessionId);
 
-        verify(documentsService, times(1)).ingestBatchFile(any(), any(), any(), any(), any());
+        verify(documentsService, times(1)).ingestBatchFile(any(), any(), any(), any(), any(), any());
         assertThat(second.httpStatus()).isEqualTo(first.httpStatus());
         assertThat(second.body()).isEqualTo(first.body());
     }
@@ -515,7 +515,7 @@ class UploadSessionServiceTest {
         body.put("code", "MALWARE_DETECTED");
         body.put("message", "Phát hiện mã độc (EICAR)");
         ApiException malware = new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, body, "Malware detected");
-        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any())).thenThrow(malware);
+        when(documentsService.ingestBatchFile(any(), any(), any(), any(), any(), any())).thenThrow(malware);
 
         assertThatThrownBy(() -> service.complete(officer, sessionId))
                 .isInstanceOf(ApiException.class)
@@ -532,7 +532,7 @@ class UploadSessionServiceTest {
                     assertThat(((ApiException) ex).getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
                     assertThat(codeOf(ex)).isEqualTo("MALWARE_DETECTED");
                 });
-        verify(documentsService, times(1)).ingestBatchFile(any(), any(), any(), any(), any());
+        verify(documentsService, times(1)).ingestBatchFile(any(), any(), any(), any(), any(), any());
     }
 
     // ---- ownership (AC-7) -------------------------------------------------------

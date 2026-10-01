@@ -86,9 +86,11 @@ class RolePermissionSeedTest {
      */
     private static final Map<String, Set<String>> EXPECTED = Map.ofEntries(
             Map.entry("document.read", Set.of("CAN_BO", "LANH_DAO")),
-            Map.entry("document.upload", Set.of("CAN_BO")),
-            Map.entry("note.write", Set.of("CAN_BO")),
-            Map.entry("tag.manage", Set.of("CAN_BO")),
+            // r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) thêm vào 5 quyền
+            // nghiệp vụ dưới đây, cùng với CAN_BO (R1).
+            Map.entry("document.upload", Set.of("CAN_BO", "LANH_DAO")),
+            Map.entry("note.write", Set.of("CAN_BO", "LANH_DAO")),
+            Map.entry("tag.manage", Set.of("CAN_BO", "LANH_DAO")),
             Map.entry("folder.read", Set.of("CAN_BO", "LANH_DAO", "QUAN_TRI")),
             Map.entry("folder.manage", Set.of("QUAN_TRI")),
             Map.entry("scan_allowlist.manage", Set.of("QUAN_TRI")),
@@ -109,12 +111,13 @@ class RolePermissionSeedTest {
             // digitization-review-01-ocr.md V28 mục 2: hàng chờ/xem/sửa/xác nhận
             // OCR/STT (R1 + chính chủ - kiểm ownership riêng ở tầng service) và
             // chuyển quyền sở hữu tài liệu (dùng ở digitization-review-03, R3).
-            Map.entry("digitization_review.manage", Set.of("CAN_BO")),
+            // r2-business-parity.md ADR-1 / V35: + LANH_DAO (R2).
+            Map.entry("digitization_review.manage", Set.of("CAN_BO", "LANH_DAO")),
             Map.entry("document.transfer_ownership", Set.of("QUAN_TRI")),
             // delete-restore-trash-01-xoa-mem-thung-rac.md V29 §2.1: xóa mềm/xem/
             // phục hồi thùng rác cá nhân (R1) và thống kê thùng rác không xem nội
-            // dung (R3, Story 3).
-            Map.entry("trash.manage", Set.of("CAN_BO")),
+            // dung (R3, Story 3). r2-business-parity.md ADR-1 / V35: + LANH_DAO (R2).
+            Map.entry("trash.manage", Set.of("CAN_BO", "LANH_DAO")),
             Map.entry("trash.stats.read", Set.of("QUAN_TRI")));
 
     /**
@@ -174,6 +177,48 @@ class RolePermissionSeedTest {
                         + "WHERE table_schema = 'public' AND table_name IN ('case_file', 'case_file_document')",
                 Integer.class);
         assertThat(tableCount).isZero();
+    }
+
+    /**
+     * r2-business-parity.md ADR-1 / V35 §5.5 case biên: nếu R3 đã tự chỉnh
+     * {@code ('LANH_DAO','tag.manage')} (set {@code updated_by_sub}) trước
+     * khi V35 chạy, {@code ON CONFLICT DO NOTHING} phải giữ nguyên dòng của
+     * R3, không lỗi, không ghi đè. Flyway chỉ chạy versioned migration một
+     * lần/DB nên không re-run được V35 thật; test này giả lập bằng cách thực
+     * thi lại đúng câu SQL của V35 sau khi chỉnh tay dòng
+     * {@code LANH_DAO/tag.manage} như một R3 edit. {@code postgres} là
+     * {@code @Container static} (dùng chung giữa các test method trong lớp),
+     * nên test tự khôi phục {@code updated_by_sub} về {@code NULL} ở cuối để
+     * không ảnh hưởng thứ tự chạy của {@code v12SeededRolePermissionRowsHaveNullUpdatedBySub}.
+     */
+    @Test
+    void v35ReRunIsNoopWhenR3AlreadyEditedThatPair() {
+        jdbcTemplate.update(
+                "UPDATE role_permission SET updated_by_sub = ? WHERE role_code = 'LANH_DAO' AND permission_code = 'tag.manage'",
+                "r3-sub-1");
+        try {
+            jdbcTemplate.update(
+                    "INSERT INTO role_permission (role_code, permission_code) VALUES "
+                            + "('LANH_DAO', 'document.upload'), "
+                            + "('LANH_DAO', 'tag.manage'), "
+                            + "('LANH_DAO', 'note.write'), "
+                            + "('LANH_DAO', 'digitization_review.manage'), "
+                            + "('LANH_DAO', 'trash.manage') "
+                            + "ON CONFLICT (role_code, permission_code) DO NOTHING");
+
+            String updatedBySub = jdbcTemplate.queryForObject(
+                    "SELECT updated_by_sub FROM role_permission WHERE role_code = 'LANH_DAO' AND permission_code = 'tag.manage'",
+                    String.class);
+            assertThat(updatedBySub).isEqualTo("r3-sub-1");
+
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM role_permission WHERE role_code = 'LANH_DAO' AND permission_code = 'tag.manage'",
+                    Integer.class);
+            assertThat(count).isEqualTo(1);
+        } finally {
+            jdbcTemplate.update(
+                    "UPDATE role_permission SET updated_by_sub = NULL WHERE role_code = 'LANH_DAO' AND permission_code = 'tag.manage'");
+        }
     }
 
     /** rbac-group-scope.md §5, Story 5 AC-2: the share row is a pure grant - no content/path columns. */

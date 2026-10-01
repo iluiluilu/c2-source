@@ -121,7 +121,7 @@ class PersonalServiceTest {
         // Mimic Hibernate's @GeneratedValue: assign an id on first save, like a
         // real JpaRepository.save() would - PersonalService reads .getId() right
         // after saving (for the audit trail), which a bare mock echo leaves null.
-        when(fileRepository.save(any())).thenAnswer(inv -> {
+        when(fileRepository.saveAndFlush(any())).thenAnswer(inv -> {
             PersonalFile f = inv.getArgument(0);
             if (f.getId() == null) {
                 setId(f, UUID.randomUUID());
@@ -213,7 +213,7 @@ class PersonalServiceTest {
                 new MockMultipartFile("file", "virus.exe", "application/x-msdownload", "not a real exe".getBytes());
 
         try (MockedStatic<MimeAllowlist> mocked = mockStatic(MimeAllowlist.class)) {
-            PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file);
+            PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename());
 
             assertThat(saved).isNotNull();
             assertThat(saved.getOriginalName()).isEqualTo("virus.exe");
@@ -230,7 +230,7 @@ class PersonalServiceTest {
         MockMultipartFile file =
                 new MockMultipartFile("file", "tool.exe", "application/x-msdownload", "MZ-header-bytes".getBytes());
 
-        PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file);
+        PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename());
 
         assertThat(saved.getOriginalName()).isEqualTo("tool.exe");
     }
@@ -244,7 +244,7 @@ class PersonalServiceTest {
         when(clamdService.scanStream(any())).thenReturn(ClamdService.ScanVerdict.infected("EICAR-TEST"));
         MockMultipartFile file = new MockMultipartFile("file", "a.txt", "text/plain", "hello".getBytes());
 
-        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file))
+        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename()))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("MALWARE_DETECTED"));
 
@@ -263,11 +263,11 @@ class PersonalServiceTest {
         when(fileRepository.sumSizeByOwnerSub(owner.sub())).thenReturn(0L);
         MockMultipartFile file = new MockMultipartFile("file", "a.txt", "text/plain", "hello".getBytes());
 
-        PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file);
+        PersonalFile saved = service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename());
 
         assertThat(saved.getSize()).isEqualTo(5);
         assertThat(saved.getBatchId()).isEqualTo(batchId);
-        verify(fileRepository).save(any());
+        verify(fileRepository).saveAndFlush(any());
         verify(uploadBatchRepository).incrementActual(batchId, 5L);
         verify(objectStorageService).putObject(anyString(), any(), eq("text/plain"), eq(PERSONAL_BUCKET));
     }
@@ -280,7 +280,7 @@ class PersonalServiceTest {
         when(fileRepository.sumSizeByOwnerSub(owner.sub())).thenReturn(8L);
         MockMultipartFile file = new MockMultipartFile("file", "a.txt", "text/plain", "hello".getBytes()); // 5 bytes: 8+5=13>10
 
-        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file))
+        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename()))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> {
                     assertThat(codeOf(ex)).isEqualTo("QUOTA_EXCEEDED");
@@ -333,7 +333,7 @@ class PersonalServiceTest {
         when(systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES)).thenReturn(4L);
         MockMultipartFile file = new MockMultipartFile("file", "a.txt", "text/plain", "hello".getBytes()); // 5 bytes > 4
 
-        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file))
+        assertThatThrownBy(() -> service.uploadFileInBatch(owner, batchId, null, file, "", file.getOriginalFilename()))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("FILE_TOO_LARGE"));
 

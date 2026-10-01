@@ -307,7 +307,25 @@ class DocumentOwnershipControllerIT {
     }
 
     @Test
-    void transfer_bWithoutCanBoRole_returns400() throws Exception {
+    void transfer_bAdminOnlyRole_returns400() throws Exception {
+        Document document = saveDocument("officer-a");
+        when(kc.getUser("admin-x")).thenReturn(Map.of("id", "admin-x", "username", "adminX", "enabled", true));
+        when(kc.listUserRealmRoles("admin-x")).thenReturn(List.of(new KcRole("r1", "quan-tri")));
+
+        mockMvc.perform(post("/admin/document-ownership/" + document.getId() + "/transfer")
+                        .with(admin())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("toUserSub", "admin-x"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("Lãnh đạo (R2)")));
+
+        assertThat(documentRepository.findById(document.getId()).orElseThrow().getUploaderSub())
+                .isEqualTo("officer-a");
+    }
+
+    @Test
+    void transfer_bIsLeaderRole_returns200AndUpdatesUploader() throws Exception {
         Document document = saveDocument("officer-a");
         when(kc.getUser("leader-x")).thenReturn(Map.of("id", "leader-x", "username", "leaderX", "enabled", true));
         when(kc.listUserRealmRoles("leader-x")).thenReturn(List.of(new KcRole("r1", "lanh-dao")));
@@ -316,10 +334,24 @@ class DocumentOwnershipControllerIT {
                         .with(admin())
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("toUserSub", "leader-x"))))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
 
         assertThat(documentRepository.findById(document.getId()).orElseThrow().getUploaderSub())
-                .isEqualTo("officer-a");
+                .isEqualTo("leader-x");
+    }
+
+    @Test
+    void transfer_bHasQuanTriPlusLanhDao_returns200() throws Exception {
+        Document document = saveDocument("officer-a");
+        when(kc.getUser("leader-y")).thenReturn(Map.of("id", "leader-y", "username", "leaderY", "enabled", true));
+        when(kc.listUserRealmRoles("leader-y"))
+                .thenReturn(List.of(new KcRole("r1", "quan-tri"), new KcRole("r2", "lanh-dao")));
+
+        mockMvc.perform(post("/admin/document-ownership/" + document.getId() + "/transfer")
+                        .with(admin())
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("toUserSub", "leader-y"))))
+                .andExpect(status().isOk());
     }
 
     @Test

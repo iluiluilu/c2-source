@@ -559,17 +559,20 @@ class TrashControllerIT {
         assertThat(d1Rows).anySatisfy(row -> assertThat(row.getAction()).isEqualTo("document.trash"));
     }
 
-    // ---- Story1-AC-7/file 02: R2 (LANH_DAO)/R3 (QUAN_TRI) không có PERM_trash.manage ----
+    // ---- r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has
+    // trash.manage too (SPEC-r2-business-parity-01 AC-1, R-7) - "chính chủ"
+    // (xoá/khôi phục tài liệu của chính mình) still applies, same as R1;
+    // R3 (QUAN_TRI) still lacks PERM_trash.manage. ----------------------------
 
     @Test
-    void trashForbiddenForR2Leader() throws Exception {
-        Document document = saveDocument("officer-a");
+    void trashSucceedsForR2LeaderOwner() throws Exception {
+        Document document = saveDocument("leader-1");
 
         mockMvc.perform(post("/documents/trash")
                         .with(leader("leader-1"))
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("documentIds", List.of(document.getId())))))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -584,10 +587,10 @@ class TrashControllerIT {
     }
 
     @Test
-    void restoreForbiddenForR2Leader() throws Exception {
-        Document document = saveDocument("officer-a");
+    void restoreSucceedsForR2LeaderOwner() throws Exception {
+        Document document = saveDocument("leader-1");
         mockMvc.perform(post("/documents/trash")
-                        .with(officer("officer-a"))
+                        .with(leader("leader-1"))
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("documentIds", List.of(document.getId())))))
                 .andExpect(status().isOk());
@@ -596,7 +599,7 @@ class TrashControllerIT {
                         .with(leader("leader-1"))
                         .contentType("application/json")
                         .content("{}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -613,5 +616,35 @@ class TrashControllerIT {
                         .contentType("application/json")
                         .content("{}"))
                 .andExpect(status().isForbidden());
+    }
+
+    // SPEC-r2-business-parity-01 AC-9 (R-6): leader sees their own trashed
+    // document in /trash and can restore it; another officer does not see it.
+    @Test
+    void leaderSeesOwnTrashedDocumentAndAnotherOfficerDoesNot() throws Exception {
+        Document document = saveDocument("leader-1");
+
+        mockMvc.perform(post("/documents/trash")
+                        .with(leader("leader-1"))
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("documentIds", List.of(document.getId())))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/trash").with(leader("leader-1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].documentId").value(document.getId().toString()));
+
+        mockMvc.perform(get("/trash").with(officer("officer-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0));
+
+        mockMvc.perform(post("/trash/" + document.getId() + "/restore")
+                        .with(leader("leader-1"))
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        assertThat(documentRepository.findById(document.getId()).orElseThrow().getDeletedAt()).isNull();
     }
 }

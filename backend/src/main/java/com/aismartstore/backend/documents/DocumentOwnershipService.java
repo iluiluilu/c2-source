@@ -31,6 +31,9 @@ public class DocumentOwnershipService {
     /** AssignableRoles.ALL's "can-bo" - the bare Keycloak realm role name for R1 (mục 4 bước 1). */
     private static final String ROLE_CAN_BO = "can-bo";
 
+    /** AssignableRoles.ALL's "lanh-dao" - the bare Keycloak realm role name for R2 (ADR-4). */
+    private static final String ROLE_LANH_DAO = "lanh-dao";
+
     private final DocumentRepository documentRepository;
     private final KeycloakAdminService kc;
     private final AuditService auditService;
@@ -81,9 +84,10 @@ public class DocumentOwnershipService {
         }
 
         List<KcRole> toUserRoles = kc.listUserRealmRoles(toUserSub);
-        boolean hasCanBoRole = toUserRoles.stream().anyMatch(role -> ROLE_CAN_BO.equals(role.name()));
-        if (!hasCanBoRole) {
-            throw new BadRequestException("Người nhận phải có vai trò Cán bộ (R1)");
+        boolean hasEligibleRole = toUserRoles.stream()
+                .anyMatch(role -> ROLE_CAN_BO.equals(role.name()) || ROLE_LANH_DAO.equals(role.name()));
+        if (!hasEligibleRole) {
+            throw new BadRequestException("Người nhận phải có vai trò Cán bộ (R1) hoặc Lãnh đạo (R2)");
         }
 
         document.setUploaderSub(toUserSub);

@@ -10,6 +10,7 @@ import java.util.UUID;
  * personal file can be streamed in server-side.
  *
  * @param expectedSha256       when non-null the streamed bytes must hash to this value (AC-13)
+ * @param displayName          client-chosen display name (validated in ingestCore); null = missing -> 422
  * @param sourcePersonalFileId when non-null the document is marked as coming from personal storage
  */
 public record IngestSource(
@@ -19,7 +20,8 @@ public record IngestSource(
         StreamOpener open,
         String relativePath,
         String expectedSha256,
-        UUID sourcePersonalFileId) {
+        UUID sourcePersonalFileId,
+        String displayName) {
 
     /** Like {@code Supplier<InputStream>} but allowed to throw {@link IOException}. */
     @FunctionalInterface

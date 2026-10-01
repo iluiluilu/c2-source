@@ -3,6 +3,10 @@ package com.aismartstore.backend.personal;
 import com.aismartstore.backend.auth.CurrentUser;
 import com.aismartstore.backend.auth.KeycloakUser;
 import com.aismartstore.backend.common.BadRequestException;
+import com.aismartstore.backend.displayname.NameCheckRateLimiter;
+import com.aismartstore.backend.displayname.NameCheckRepository;
+import com.aismartstore.backend.displayname.NameCheckRequest;
+import com.aismartstore.backend.displayname.NameCheckSupport;
 import com.aismartstore.backend.ingest.UploadBatch;
 import com.aismartstore.backend.personal.dto.CreatePersonalFolderDto;
 import com.aismartstore.backend.personal.dto.MovePersonalFileDto;
@@ -49,16 +53,24 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/personal")
 public class PersonalController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PersonalController.class);
+
     private static final String ALL_ROLES = "hasAuthority('PERM_personal.manage')";
 
     private final PersonalService personalService;
     private final UploadSessionService uploadSessionService;
     private final PersonalToWarehouseService personalToWarehouseService;
+    private final NameCheckRateLimiter nameCheckRateLimiter;
+    private final NameCheckRepository nameCheckRepository;
 
     public PersonalController(
             PersonalService personalService,
             UploadSessionService uploadSessionService,
-            PersonalToWarehouseService personalToWarehouseService) {
+            PersonalToWarehouseService personalToWarehouseService,
+            NameCheckRateLimiter nameCheckRateLimiter,
+            NameCheckRepository nameCheckRepository) {
+        this.nameCheckRateLimiter = nameCheckRateLimiter;
+        this.nameCheckRepository = nameCheckRepository;
         this.personalService = personalService;
         this.uploadSessionService = uploadSessionService;
         this.personalToWarehouseService = personalToWarehouseService;
@@ -173,11 +185,14 @@ public class PersonalController {
             @CurrentUser KeycloakUser user,
             @PathVariable UUID batchId,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(required = false) UUID folderId) {
+            @RequestParam(required = false) UUID folderId,
+            @RequestParam(required = false, defaultValue = "") String relativePath,
+            @RequestParam(required = false) String displayName) {
         if (file.isEmpty()) {
             throw new BadRequestException("Missing 'file' field");
         }
-        PersonalFile saved = personalService.uploadFileInBatch(user, batchId, folderId, file);
+        PersonalFile saved =
+                personalService.uploadFileInBatch(user, batchId, folderId, file, relativePath, displayName);
         return ResponseEntity.status(HttpStatus.CREATED).body(new UploadedFileView("STORED", saved));
     }
 
@@ -187,6 +202,21 @@ public class PersonalController {
      * ({@code chunks}/{@code status}/{@code complete}) live under the
      * domain-neutral {@code /upload-sessions/**} (spec 01).
      */
+    /** SPEC-folder-upload-display-name BE-5: which candidate names are already taken in the caller's personal folder. */
+    @PostMapping("/name-check")
+    @PreAuthorize(ALL_ROLES)
+    public List<NameCheckRequest.Result> nameCheck(
+            @CurrentUser KeycloakUser user, @Valid @RequestBody NameCheckRequest request) {
+        nameCheckRateLimiter.check(user.sub(), "personal.name-check");
+        if (request.folderId() != null) {
+            personalService.assertOwnedFolder(user, request.folderId());
+        }
+        List<NameCheckRepository.Candidate> candidates = NameCheckSupport.toCandidates(request);
+        boolean[] taken = nameCheckRepository.personalTaken(user.sub(), request.folderId(), candidates);
+        log.info("name-check endpoint=personal files={} taken={}", taken.length, NameCheckSupport.count(taken));
+        return NameCheckSupport.toResults(taken);
+    }
+
     @PostMapping("/batches/{batchId}/upload-sessions")
     @PreAuthorize(ALL_ROLES)
     public ResponseEntity<OpenUploadSessionView> initUploadSession(

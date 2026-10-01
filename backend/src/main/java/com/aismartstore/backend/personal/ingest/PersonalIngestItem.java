@@ -38,6 +38,12 @@ public class PersonalIngestItem {
     @Column(name = "original_name", nullable = false, length = 512)
     private String originalName;
 
+    @Column(name = "display_name", length = 512)
+    private String displayName;
+
+    @Column(name = "name_retry_count", nullable = false)
+    private int nameRetryCount;
+
     @Column(nullable = false)
     private long size;
 
@@ -86,6 +92,22 @@ public class PersonalIngestItem {
 
     public void setOriginalName(String originalName) {
         this.originalName = originalName;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public int getNameRetryCount() {
+        return nameRetryCount;
+    }
+
+    public void setNameRetryCount(int nameRetryCount) {
+        this.nameRetryCount = nameRetryCount;
     }
 
     public long getSize() {

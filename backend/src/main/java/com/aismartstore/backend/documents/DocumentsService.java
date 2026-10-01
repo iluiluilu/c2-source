@@ -5,7 +5,10 @@ import com.aismartstore.backend.audit.AuditService;
 import com.aismartstore.backend.auth.KeycloakUser;
 import com.aismartstore.backend.common.ApiException;
 import com.aismartstore.backend.common.NotFoundException;
+import com.aismartstore.backend.common.SqlErrors;
 import com.aismartstore.backend.digitization.DocumentIngestedEvent;
+import com.aismartstore.backend.displayname.DisplayNameValidator;
+import com.aismartstore.backend.displayname.NameCheckRepository;
 import com.aismartstore.backend.groups.BusinessDataScope;
 import com.aismartstore.backend.groups.DocumentScopeGuard;
 import com.aismartstore.backend.groups.GroupMemberRepository;
@@ -40,12 +43,12 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -83,6 +86,7 @@ public class DocumentsService {
     private final DocumentScopeGuard documentScopeGuard;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final OutboxEventRepository outboxEventRepository;
+    private final NameCheckRepository nameCheckRepository;
 
     public DocumentsService(
             DocumentRepository documentRepository,
@@ -101,7 +105,8 @@ public class DocumentsService {
             GroupMemberRepository groupMemberRepository,
             DocumentScopeGuard documentScopeGuard,
             ApplicationEventPublisher applicationEventPublisher,
-            OutboxEventRepository outboxEventRepository) {
+            OutboxEventRepository outboxEventRepository,
+            NameCheckRepository nameCheckRepository) {
         this.documentRepository = documentRepository;
         this.uploadBatchService = uploadBatchService;
         this.warehouseCapacityService = warehouseCapacityService;
@@ -119,6 +124,7 @@ public class DocumentsService {
         this.documentScopeGuard = documentScopeGuard;
         this.applicationEventPublisher = applicationEventPublisher;
         this.outboxEventRepository = outboxEventRepository;
+        this.nameCheckRepository = nameCheckRepository;
     }
 
     public record DocumentContent(Document document, ResponseInputStream<GetObjectResponse> stream) {
@@ -134,6 +140,7 @@ public class DocumentsService {
     public record DocumentListItem(
             UUID id,
             String originalName,
+            String displayName,
             String mimeType,
             long size,
             String sha256,
@@ -148,6 +155,7 @@ public class DocumentsService {
             return new DocumentListItem(
                     document.getId(),
                     document.getOriginalName(),
+                    document.getDisplayName(),
                     document.getMimeType(),
                     document.getSize(),
                     document.getSha256(),
@@ -166,7 +174,8 @@ public class DocumentsService {
      * updating both.
      */
     public IngestOutcome ingestBatchFile(
-            KeycloakUser user, UUID batchId, MultipartFile file, String relativePath, String note) {
+            KeycloakUser user, UUID batchId, MultipartFile file, String relativePath, String displayName,
+            String note) {
         // 1) load + lazily expire the batch.
         UploadBatch batch = uploadBatchService.loadOpenBatch(batchId);
 
@@ -174,7 +183,7 @@ public class DocumentsService {
         String mimeType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
         IngestSource source = new IngestSource(
                 originalName, mimeType, file.getSize(), file::getInputStream,
-                relativePath == null ? "" : relativePath, null, null);
+                relativePath == null ? "" : relativePath, null, null, displayName);
         return ingestCore(user, batch, source, note);
     }
 
@@ -193,14 +202,14 @@ public class DocumentsService {
         warehouseCapacityService.assertIngestAllowed();
 
         String originalName = src.originalName();
-        String path = src.relativePath() == null ? "" : src.relativePath();
-        // 3) duplicate detection - cheapest check first, no batch/pipeline cost.
-        Optional<Document> duplicate = documentRepository
-                .findFirstByFolderIdAndRelativePathAndOriginalNameAndStatusAndDeletedAtIsNull(
-                        batch.getTargetFolderId(), path, originalName, DocumentStatus.CLEAN);
-        if (duplicate.isPresent()) {
-            uploadBatchService.incrementSkipped(batchId);
-            return new IngestOutcome.Skipped("ALREADY_EXISTS", duplicate.get().getId());
+        String path = DisplayNameValidator.normalizeRelativePath(src.relativePath());
+        // 3) display-name validation (QD4, AC-28) then a cheap early conflict check - before any quota
+        // reservation/scan. The unique index below stays the authoritative arbiter (race between 2 uploads).
+        String displayName = DisplayNameValidator.validate(originalName, src.displayName());
+        if (nameCheckRepository
+                .warehouseTaken(batch.getTargetFolderId(), List.of(new NameCheckRepository.Candidate(path, displayName)))[0]) {
+            log.info("display_name conflict (early) context=ingest");
+            throw DisplayNameValidator.conflict();
         }
 
         // 3b) per-file size cap - before reserving batch quota, on purpose.
@@ -233,7 +242,7 @@ public class DocumentsService {
                     allowlistService.checkFormat(tempFile.toFile(), originalName, mimeType);
             if (!formatCheck.ok()) {
                 persistFailure(
-                        user, batch.getTargetFolderId(), path, originalName, mimeType, tempFile, null,
+                        user, batch.getTargetFolderId(), path, originalName, displayName, mimeType, tempFile, null,
                         DocumentStatus.REJECTED, Map.of("engine", "clamav", "rejectReason", formatCheck.reason()));
                 uploadBatchService.incrementRejected(batchId);
                 throw invalidFormat(formatCheck.reason());
@@ -247,7 +256,7 @@ public class DocumentsService {
             ClamdService.ScanVerdict verdict = scan(tempFile);
             if (!verdict.clean()) {
                 persistFailure(
-                        user, batch.getTargetFolderId(), path, originalName, mimeType, tempFile, sha256,
+                        user, batch.getTargetFolderId(), path, originalName, displayName, mimeType, tempFile, sha256,
                         DocumentStatus.INFECTED, Map.of("engine", "clamav", "signature", verdict.signature()));
                 uploadBatchService.incrementRejected(batchId);
                 throw malwareDetected(verdict.signature());
@@ -260,6 +269,7 @@ public class DocumentsService {
 
             Document document = new Document();
             document.setOriginalName(originalName);
+            document.setDisplayName(displayName);
             document.setMimeType(mimeType);
             document.setSize(fileSize(tempFile));
             document.setSha256(sha256);
@@ -274,7 +284,18 @@ public class DocumentsService {
                 document.setSourcePersonalFileId(src.sourcePersonalFileId());
             }
             document.setCreatedAt(OffsetDateTime.now());
-            documentRepository.save(document); // 8a - commits immediately (no surrounding @Transactional).
+            try {
+                documentRepository.save(document); // 8a - commits immediately (no surrounding @Transactional).
+            } catch (DataIntegrityViolationException e) {
+                if (SqlErrors.isUniqueViolation(e)) {
+                    // Lost the race on UQ_document_display_name_alive: give the reservation back so the
+                    // client's retry (new suffix) does not count this file twice against the batch.
+                    uploadBatchService.release(batchId, src.size());
+                    log.info("display_name conflict (unique) context=ingest");
+                    throw DisplayNameValidator.conflict();
+                }
+                throw e;
+            }
 
             try {
                 objectStorageService.putObject(storageKey, tempFile.toFile(), mimeType); // 8b
@@ -382,6 +403,7 @@ public class DocumentsService {
             UUID folderId,
             String relativePath,
             String originalName,
+            String displayName,
             String mimeType,
             Path tempFile,
             String sha256,
@@ -389,6 +411,7 @@ public class DocumentsService {
             Map<String, Object> scanResult) {
         Document document = new Document();
         document.setOriginalName(originalName);
+        document.setDisplayName(displayName);
         document.setMimeType(mimeType);
         document.setSize(fileSize(tempFile));
         document.setSha256(sha256);
@@ -400,7 +423,14 @@ public class DocumentsService {
         document.setStatus(status);
         document.setScanResult(scanResult);
         document.setCreatedAt(OffsetDateTime.now());
-        documentRepository.save(document);
+        try {
+            documentRepository.save(document);
+        } catch (DataIntegrityViolationException e) {
+            // Evidence row of an infected file whose name is already held (race) - the rejection itself
+            // still goes back to the client; only the evidence row is dropped.
+            log.warn("Could not persist evidence row for a {} upload (display_name held): {}", status, e.getMessage());
+            return;
+        }
 
         auditService.recordAsync(new AuditService.AuditEntry(
                 user.preferredUsername(),

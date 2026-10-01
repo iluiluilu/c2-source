@@ -206,7 +206,8 @@ class PersonalControllerIT {
     private ResultActions uploadFile(JwtRequestPostProcessor jwt, String batchId, String filename, byte[] content)
             throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", filename, "text/plain", content);
-        return mockMvc.perform(multipart("/personal/batches/" + batchId + "/files").file(file).with(jwt));
+        return mockMvc.perform(multipart("/personal/batches/" + batchId + "/files").file(file)
+                .param("displayName", filename).with(jwt));
     }
 
     private int uploadFileStatus(JwtRequestPostProcessor jwt, String batchId, String filename, byte[] content) {
@@ -215,6 +216,67 @@ class PersonalControllerIT {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    // ---- SPEC-folder-upload-display-name (personal): name-check, unique, relativePath -----------------
+
+    @Test
+    void personalUploadKeepsRelativePathRejectsDuplicateNameAndNameCheckSeesIt() throws Exception {
+        String sub = "owner-" + UUID.randomUUID();
+        seedAccount(sub, 1_000_000);
+        String batchId = openBatch(user(sub), 5, 100L);
+
+        MockMultipartFile file = new MockMultipartFile("file", "hello.txt", "text/plain", "hi".getBytes());
+        mockMvc.perform(multipart("/personal/batches/" + batchId + "/files").file(file)
+                        .param("displayName", "hello.txt").param("relativePath", "Hồ sơ/2026").with(user(sub)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.file.relativePath").value("Hồ sơ/2026"))
+                .andExpect(jsonPath("$.file.displayName").value("hello.txt"))
+                .andExpect(jsonPath("$.file.storageKey").doesNotExist());
+
+        // same (relativePath, lower(name)) -> 409, no second row
+        MockMultipartFile again = new MockMultipartFile("file", "HELLO.txt", "text/plain", "hi".getBytes());
+        mockMvc.perform(multipart("/personal/batches/" + batchId + "/files").file(again)
+                        .param("displayName", "HELLO.txt").param("relativePath", "Hồ sơ/2026").with(user(sub)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_CONFLICT"));
+        assertThat(personalFileRepository.findAll()).hasSize(1);
+
+        // a different relative path is a different name
+        mockMvc.perform(multipart("/personal/batches/" + batchId + "/files").file(again)
+                        .param("displayName", "HELLO.txt").param("relativePath", "other").with(user(sub)))
+                .andExpect(status().isCreated());
+
+        String body = objectMapper.writeValueAsString(Map.of("files", List.of(
+                Map.of("relativePath", "Hồ sơ/2026", "originalName", "Hello.TXT"),
+                Map.of("relativePath", "", "originalName", "hello.txt"))));
+        mockMvc.perform(post("/personal/name-check").contentType("application/json").content(body).with(user(sub)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].taken").value(true))
+                .andExpect(jsonPath("$[1].taken").value(false));
+
+        // the listing exposes displayName but never the storage key
+        mockMvc.perform(get("/personal/files").with(user(sub)))
+                .andExpect(jsonPath("$[0].storageKey").doesNotExist())
+                .andExpect(jsonPath("$[0].displayName").exists());
+    }
+
+    @Test
+    void personalNameCheckRejectsMoreThan1000FilesAndForeignFolders() throws Exception {
+        String sub = "owner-" + UUID.randomUUID();
+        seedAccount(sub, 1_000_000);
+        List<Map<String, String>> files = new java.util.ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            files.add(Map.of("relativePath", "", "originalName", "f" + i));
+        }
+        mockMvc.perform(post("/personal/name-check").contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("files", files))).with(user(sub)))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/personal/name-check").contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("folderId", UUID.randomUUID().toString(), "files", List.of())))
+                        .with(user(sub)))
+                .andExpect(status().isNotFound());
     }
 
     // ---- Story 2/3: happy path, batch -> file -> visible in files & quota ----

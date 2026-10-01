@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -284,9 +285,17 @@ class PersonalToWarehouseIT {
         return personalFileRepository.save(f);
     }
 
+    /** displayNames for every personal file in the DB (= its original name); the server ignores unselected ones. */
+    private List<Map<String, Object>> defaultDisplayNames() {
+        return personalFileRepository.findAll().stream()
+                .map(f -> Map.<String, Object>of("personalFileId", f.getId(), "displayName", f.getOriginalName()))
+                .toList();
+    }
+
     private String body(UUID target, List<UUID> fileIds, List<UUID> folderIds) throws Exception {
-        return objectMapper.writeValueAsString(
-                Map.of("targetFolderId", target, "fileIds", fileIds, "folderIds", folderIds));
+        return objectMapper.writeValueAsString(Map.of(
+                "targetFolderId", target, "fileIds", fileIds, "folderIds", folderIds,
+                "displayNames", defaultDisplayNames()));
     }
 
     private Map<String, Object> startOk(UUID target, List<UUID> fileIds, List<UUID> folderIds) throws Exception {
@@ -303,11 +312,16 @@ class PersonalToWarehouseIT {
         return parsed;
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> awaitClosed(Object batchId) {
+        return awaitClosedAs(officer(), batchId);
+    }
+
+    /** Same as {@link #awaitClosed}, parameterized by role - {@code /ingest/from-personal/{id}} is owner-scoped. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> awaitClosedAs(JwtRequestPostProcessor role, Object batchId) {
         Map<String, Object>[] holder = new Map[1];
         await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(200)).until(() -> {
-            String json = mockMvc.perform(get("/ingest/from-personal/" + batchId).with(officer()))
+            String json = mockMvc.perform(get("/ingest/from-personal/" + batchId).with(role))
                     .andExpect(status().isOk())
                     .andReturn()
                     .getResponse()
@@ -328,20 +342,66 @@ class PersonalToWarehouseIT {
 
     // -------------------------------------------------------------- AC-1 / AC-3
 
+    // r2-business-parity.md ADR-1 / V35: LANH_DAO (R2) now has document.upload
+    // too (SPEC-r2-business-parity-01 AC-1, R-7) - split into "leader, owner of
+    // their own personal file, gets 202" + "admin (R3) still 403".
     @Test
-    void canBoGets202ButLeaderAndAdminAre403() throws Exception {
+    void canBoGets202() throws Exception {
         UUID target = createWarehouseFolder("Kho");
         PersonalFile f = personalPng(OWNER, null, "a.png", "a");
 
         startOk(target, List.of(f.getId()), List.of());
+    }
 
-        for (JwtRequestPostProcessor other : List.of(leader(), admin())) {
-            mockMvc.perform(post("/ingest/from-personal")
-                            .with(other)
-                            .contentType("application/json")
-                            .content(body(target, List.of(f.getId()), List.of())))
-                    .andExpect(status().isForbidden());
-        }
+    @Test
+    void leaderGets202ForTheirOwnPersonalFile() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile f = personalPng("leader-1", null, "a.png", "a");
+
+        mockMvc.perform(post("/ingest/from-personal")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(body(target, List.of(f.getId()), List.of())))
+                .andExpect(status().isAccepted());
+    }
+
+    // SPEC-r2-business-parity-01 AC-9 (R-6): the document created from a
+    // leader-initiated personal-to-warehouse ingest carries uploader_sub of
+    // the leader who started it, same as R1 (§4.3 assertion above).
+    @Test
+    void leaderInitiatedIngestProducesADocumentUploadedByTheLeader() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile f = personalPng("leader-1", null, "a.png", "a");
+
+        String json = mockMvc.perform(post("/ingest/from-personal")
+                        .with(leader())
+                        .contentType("application/json")
+                        .content(body(target, List.of(f.getId()), List.of())))
+                .andExpect(status().isAccepted())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> started = objectMapper.readValue(json, Map.class);
+        awaitClosedAs(leader(), started.get("batchId"));
+
+        Document created = documentRepository.findAll().stream()
+                .filter(d -> f.getId().equals(d.getSourcePersonalFileId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(created.getUploaderSub()).isEqualTo("leader-1");
+    }
+
+    @Test
+    void adminIsStillForbidden() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile f = personalPng(OWNER, null, "a.png", "a");
+
+        mockMvc.perform(post("/ingest/from-personal")
+                        .with(admin())
+                        .contentType("application/json")
+                        .content(body(target, List.of(f.getId()), List.of())))
+                .andExpect(status().isForbidden());
     }
 
     // -------------------------------------------------------------------- AC-2
@@ -495,11 +555,141 @@ class PersonalToWarehouseIT {
         assertThat(documentRepository.findAll().stream().filter(d -> "clean".equals(d.getStatus())))
                 .hasSize(1);
 
-        // AC-15: re-sending the same request skips what already made it in.
+        // SPEC-folder-upload-display-name: no more SKIPPED/ALREADY_EXISTS - re-sending the same display name
+        // is a per-item DISPLAY_NAME_CONFLICT (the client then renames it, see the PUT tests below).
         Map<String, Object> again = startOk(target, List.of(good.getId()), List.of());
         Map<String, Object> againResult = awaitClosed(again.get("batchId"));
-        assertThat(itemFor(againResult, good.getId()).get("status")).isEqualTo("SKIPPED");
-        assertThat(itemFor(againResult, good.getId()).get("code")).isEqualTo("ALREADY_EXISTS");
+        assertThat(itemFor(againResult, good.getId()).get("status")).isEqualTo("FAILED");
+        assertThat(itemFor(againResult, good.getId()).get("code")).isEqualTo("DISPLAY_NAME_CONFLICT");
+    }
+
+    // ---------------------------------------------- display-name (AC-18/19/20)
+
+    @Test
+    void nameCheckExpandsTheSelectionLikeStartAndReportsTakenNames() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFolder a = personalFolder(OWNER, "A", null);
+        PersonalFile inA = personalPng(OWNER, a.getId(), "x.png", "x");
+        PersonalFile loose = personalPng(OWNER, null, "loose.png", "loose");
+        awaitClosed(startOk(target, List.of(), List.of(a.getId())).get("batchId")); // x.png now lives at path "A"
+
+        String json = mockMvc.perform(post("/ingest/from-personal/name-check")
+                        .with(officer())
+                        .contentType("application/json")
+                        .content(body(target, List.of(loose.getId()), List.of(a.getId()))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        List<Map<String, Object>> items = objectMapper.readValue(json, List.class);
+        assertThat(items).hasSize(2);
+        Map<String, Object> xa = items.stream().filter(i -> inA.getId().toString().equals(i.get("personalFileId"))).findFirst().orElseThrow();
+        Map<String, Object> l = items.stream().filter(i -> loose.getId().toString().equals(i.get("personalFileId"))).findFirst().orElseThrow();
+        assertThat(xa.get("relativePath")).isEqualTo("A");
+        assertThat(xa.get("taken")).isEqualTo(true);
+        assertThat(l.get("relativePath")).isEqualTo("");
+        assertThat(l.get("taken")).isEqualTo(false);
+    }
+
+    @Test
+    void relativePathIsFolderTreePathPlusThePersonalFilesOwnRelativePath() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFolder a = personalFolder(OWNER, "A", null);
+        PersonalFile f = personalPng(OWNER, a.getId(), "x.png", "x");
+        f.setRelativePath("sub/deep");
+        personalFileRepository.save(f);
+        awaitClosed(startOk(target, List.of(), List.of(a.getId())).get("batchId"));
+        assertThat(documentRepository.findAll().get(0).getRelativePath()).isEqualTo("A/sub/deep");
+    }
+
+    @Test
+    void missingOrInvalidDisplayNameFailsOnlyThatItem() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile ok = personalPng(OWNER, null, "ok.png", "ok");
+        PersonalFile missing = personalPng(OWNER, null, "missing.png", "missing");
+        PersonalFile bad = personalPng(OWNER, null, "bad.png", "bad");
+        String content = objectMapper.writeValueAsString(Map.of(
+                "targetFolderId", target,
+                "fileIds", List.of(ok.getId(), missing.getId(), bad.getId()),
+                "folderIds", List.of(),
+                "displayNames", List.of(
+                        Map.of("personalFileId", ok.getId(), "displayName", "ok.png"),
+                        Map.of("personalFileId", bad.getId(), "displayName", "not-related.png"))));
+        String json = mockMvc.perform(post("/ingest/from-personal").with(officer()).contentType("application/json").content(content))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+        Map<String, Object> result = awaitClosed(objectMapper.readValue(json, Map.class).get("batchId"));
+        assertThat(itemFor(result, ok.getId()).get("status")).isEqualTo("INGESTED");
+        assertThat(itemFor(result, missing.getId()).get("code")).isEqualTo("DISPLAY_NAME_MISSING");
+        assertThat(itemFor(result, bad.getId()).get("code")).isEqualTo("INVALID_DISPLAY_NAME");
+    }
+
+    @Test
+    void conflictItemCanBeRenamedThreeTimesAndTheFourthIsRejected() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile good = personalPng(OWNER, null, "good.png", "good");
+        awaitClosed(startOk(target, List.of(good.getId()), List.of()).get("batchId"));
+        Map<String, Object> again = startOk(target, List.of(good.getId()), List.of());
+        String batchId = (String) again.get("batchId");
+        Map<String, Object> result = awaitClosed(batchId);
+        Map<String, Object> item = itemFor(result, good.getId());
+        assertThat(item.get("code")).isEqualTo("DISPLAY_NAME_CONFLICT");
+        String itemId = (String) item.get("itemId");
+
+        // 1st rename: still clashes (a valid suffix name that is already taken is simulated by reusing the
+        // original name, which is invalid -> 422 and does NOT consume a retry).
+        mockMvc.perform(put("/ingest/from-personal/" + batchId + "/items/" + itemId + "/display-name")
+                        .with(officer()).contentType("application/json").content("{\"displayName\":\"other.png\"}"))
+                .andExpect(status().isUnprocessableEntity());
+
+        // A valid suffix name -> item goes PENDING, re-runs and is ingested.
+        String suffixed = "good_20260930101530123-ab12cd.png";
+        mockMvc.perform(put("/ingest/from-personal/" + batchId + "/items/" + itemId + "/display-name")
+                        .with(officer()).contentType("application/json").content("{\"displayName\":\"" + suffixed + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.nameRetryCount").value(1));
+        Map<String, Object> after = awaitClosed(batchId);
+        assertThat(itemFor(after, good.getId()).get("status")).isEqualTo("INGESTED");
+        assertThat(documentRepository.findAll().stream().map(Document::getDisplayName)).contains(suffixed);
+
+        // an item that is no longer FAILED/DISPLAY_NAME_CONFLICT cannot be renamed
+        mockMvc.perform(put("/ingest/from-personal/" + batchId + "/items/" + itemId + "/display-name")
+                        .with(officer()).contentType("application/json").content("{\"displayName\":\"" + suffixed + "\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void renameRetryCountIsCappedAtThreeByTheServer() throws Exception {
+        UUID target = createWarehouseFolder("Kho");
+        PersonalFile good = personalPng(OWNER, null, "good.png", "good");
+        awaitClosed(startOk(target, List.of(good.getId()), List.of()).get("batchId"));
+        String batchId = (String) startOk(target, List.of(good.getId()), List.of()).get("batchId");
+        Map<String, Object> item = itemFor(awaitClosed(batchId), good.getId());
+        String itemId = (String) item.get("itemId");
+
+        // burn 3 retries: each suffix name is pre-occupied so the item fails again with DISPLAY_NAME_CONFLICT
+        for (int i = 1; i <= 3; i++) {
+            String name = "good_2026093010153012" + i + "-ab12cd.png";
+            Document blocker = new Document();
+            blocker.setOriginalName("good.png");
+            blocker.setDisplayName(name);
+            blocker.setMimeType("image/png");
+            blocker.setSize(1);
+            blocker.setUploaderSub("someone");
+            blocker.setUploaderUsername("someone");
+            blocker.setStatus("clean");
+            blocker.setFolderId(target);
+            blocker.setRelativePath("");
+            blocker.setCreatedAt(OffsetDateTime.now());
+            documentRepository.save(blocker);
+            mockMvc.perform(put("/ingest/from-personal/" + batchId + "/items/" + itemId + "/display-name")
+                            .with(officer()).contentType("application/json").content("{\"displayName\":\"" + name + "\"}"))
+                    .andExpect(status().isOk());
+            Map<String, Object> r = awaitClosed(batchId);
+            assertThat(itemFor(r, good.getId()).get("code")).isEqualTo("DISPLAY_NAME_CONFLICT");
+        }
+        mockMvc.perform(put("/ingest/from-personal/" + batchId + "/items/" + itemId + "/display-name")
+                        .with(officer()).contentType("application/json")
+                        .content("{\"displayName\":\"good_20260930101530199-ab12cd.png\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     // -------------------------------------------------------------------- AC-14
@@ -631,6 +821,7 @@ class PersonalToWarehouseIT {
         mockMvc.perform(multipart("/ingest/batches/" + batchId + "/files")
                         .file(new MockMultipartFile("file", "m.png", "image/png", pngBytes("multipart")))
                         .param("relativePath", "sub/dir")
+                        .param("displayName", "m.png")
                         .with(officer()))
                 .andExpect(status().isCreated());
         Document m = documentRepository.findAll().stream()

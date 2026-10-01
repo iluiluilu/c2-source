@@ -330,4 +330,30 @@ class AuditControllerIT {
 
         assertThat(response).contains(sharedDocument.getId().toString());
     }
+
+    // SPEC-r2-business-parity-01 AC-9 (R-6): tag/note events on a document the
+    // leader uploaded show up in the leader's own scoped /audit read - same
+    // `audit.read_scoped` behaviour as for R1's events (V22, unchanged by this
+    // story). NB: `ingest.batch.*` events use resource_type='upload_batch',
+    // which AuditScopeFilter's documented v1 limitation never scopes to R2
+    // regardless of uploader (see its class Javadoc) - that is a pre-existing,
+    // out-of-scope limitation, not something this story changes or re-tests.
+    @Test
+    void leaderSeesTagAndNoteEventsOnTheirOwnDocument() throws Exception {
+        String leaderSub = "leader-" + UUID.randomUUID();
+        Document ownDocument = saveDocument(leaderSub);
+
+        insertUnsealedRow("tag.assign", "document", ownDocument.getId().toString());
+        insertUnsealedRow("note.create", "document", ownDocument.getId().toString());
+
+        String response = mockMvc.perform(get("/audit").with(leader(leaderSub)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).contains(ownDocument.getId().toString());
+        assertThat(response).contains("tag.assign");
+        assertThat(response).contains("note.create");
+    }
 }

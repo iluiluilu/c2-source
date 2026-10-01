@@ -29,6 +29,9 @@ public class Document {
     @Column(name = "original_name", nullable = false, length = 512)
     private String originalName;
 
+    @Column(name = "display_name", nullable = false, length = 512)
+    private String displayName;
+
     @Column(name = "mime_type", nullable = false)
     private String mimeType;
 
@@ -188,6 +191,25 @@ public class Document {
         this.originalName = originalName;
     }
 
+    /**
+     * Safety net: every production write path sets display_name explicitly (SPEC-folder-upload-display-name);
+     * this only keeps a row without one (e.g. direct-repository fixtures) valid - display_name defaults to original_name.
+     */
+    @jakarta.persistence.PrePersist
+    void defaultDisplayName() {
+        if (displayName == null) {
+            displayName = originalName;
+        }
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
     public String getMimeType() {
         return mimeType;
     }
@@ -212,6 +234,7 @@ public class Document {
         this.sha256 = sha256;
     }
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public String getStorageKey() {
         return storageKey;
     }
