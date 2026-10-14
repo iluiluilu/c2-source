@@ -1,5 +1,6 @@
 package com.aismartstore.backend.search.index;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.digitization.results.DigitizationRun;
 import com.aismartstore.backend.digitization.results.DigitizationRunRepository;
 import com.aismartstore.backend.digitization.results.ContentSegmentRepository;
@@ -83,6 +84,7 @@ public class SearchIndexReconciliationJob {
     }
 
     @Scheduled(cron = "${app.search-index.reconciliation-cron:0 0 3 * * *}")
+    @SchedulerLock(name = "search-index-reconciliation", lockAtMostFor = "PT24H", lockAtLeastFor = "PT1M")
     public void run() {
         int checked = 0;
         int mismatches = 0;

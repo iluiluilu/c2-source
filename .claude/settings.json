@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "Read",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "Bash(python3 -c ' *)",
+      "Bash(unzip -o -q /Users/linhnt/.m2/repository/software/amazon/awssdk/sdk-core/2.28.11/sdk-core-2.28.11.jar -d sdk-core-extracted software/amazon/awssdk/core/ResponseInputStream.class software/amazon/awssdk/core/io/AbortableInputStream.class)",
+      "Bash(javap -p /tmp/sdk-core-extracted/software/amazon/awssdk/core/ResponseInputStream.class)",
+      "Bash(javap -p /tmp/sdk-core-extracted/software/amazon/awssdk/core/io/AbortableInputStream.class)",
+      "Bash(java -version)",
+      "Bash(mvn -version)",
+      "Bash(mvn -o compile)",
+      "Bash(rm -rf target/classes)",
+      "Bash(mvn -o test-compile)",
+      "Bash(mvn -o test -Dtest=PersonalServiceTest -DfailIfNoTests=false)",
+      "Bash(mvn -o test -Dtest=PersonalControllerIT -DfailIfNoTests=false)",
+      "Bash(mvn -o test -Dtest=PersonalControllerIT,IngestControllerIT,AccountsControllerIT,SystemConfigControllerIT,WarehouseControllerIT -DfailIfNoTests=false)",
+      "Bash(mvn -q -o test -Dtest=PersonalServiceTest,UploadBatchServiceTest)",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(mvn -q -o test -Dtest=PersonalServiceTest,UploadBatchServiceTest > /tmp/mvn_test_out.log 2>&1; echo \"MVN_EXIT=$?\"; tail -100 /tmp/mvn_test_out.log)",
+      "Bash(mvn -q -o test -Dtest=PersonalControllerIT > /tmp/mvn_it_out.log 2>&1; echo \"MVN_EXIT=$?\"; tail -250 /tmp/mvn_it_out.log)",
+      "Bash(npx tsc *)",
+      "Bash(mvn -o clean compile)",
+      "Bash(tee /tmp/mvn-test-out.log)",
+      "Bash(tee /tmp/mvn-test-out2.log)",
+      "Bash(mvn -o test -Dtest=PersonalControllerIT)",
+      "Bash(tee /tmp/mvn-test-full.log)",
+      "Bash(tee /tmp/mvn-test-full2.log)",
+      "Bash(tee /tmp/mvn-test-full3.log)",
+      "Bash(sort -k6,7)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}

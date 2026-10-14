@@ -12,6 +12,8 @@ WORKDIR /app
 # shells out to the `ffmpeg` binary on PATH - not a Java library, must be present
 # in this image too (base is Debian/Ubuntu, hence apt-get not apk).
 #
+# export-reporting (JasperReports): fontconfig/freetype/fonts-dejavu-core for headless AWT (charts, TTF loading).
+#
 # The base image's default sources point at plain http://ports.ubuntu.com;
 # on some networks a transparent proxy/DPI corrupts large plain-HTTP package
 # downloads in transit, which apt catches as "Hash Sum mismatch" on a
@@ -19,7 +21,7 @@ WORKDIR /app
 # interception and has fixed this reliably - see AGENTS.md/CLAUDE.md gotchas.
 RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports/|https://ports.ubuntu.com/ubuntu-ports/|g' \
         /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconfig libfreetype6 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Same dependency-caching trick as the production image; without it every

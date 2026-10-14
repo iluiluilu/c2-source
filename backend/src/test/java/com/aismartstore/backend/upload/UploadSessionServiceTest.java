@@ -82,7 +82,7 @@ class UploadSessionServiceTest {
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         service = new UploadSessionService(
                 uploadSessionRepository, uploadBatchService, documentsService, personalService, systemConfigService,
-                objectMapper, mock(AuditService.class), mock(AuditRequestContext.class));
+                objectMapper, mock(AuditService.class), mock(AuditRequestContext.class), new UploadProperties(null));
 
         when(systemConfigService.getLong(SystemConfigDefaults.INGEST_MAX_FILE_SIZE_BYTES))
                 .thenReturn(2_000_000_000L);
@@ -360,6 +360,80 @@ class UploadSessionServiceTest {
                         service.appendChunk(officer, sessionId, 0, new ByteArrayInputStream("hi".getBytes(StandardCharsets.UTF_8))))
                 .isInstanceOf(ApiException.class)
                 .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("UPLOAD_SESSION_NOT_OPEN"));
+    }
+
+    // ---- backend-multi-instance: temp-dir (Task 9/10, AC-10/AC-14) ------------
+
+    private UploadSessionService serviceWithTempDir(Path tempDir) {
+        return new UploadSessionService(
+                uploadSessionRepository, uploadBatchService, documentsService, personalService, systemConfigService,
+                new ObjectMapper().findAndRegisterModules(), mock(AuditService.class), mock(AuditRequestContext.class),
+                new UploadProperties(tempDir.toString()));
+    }
+
+    @Test
+    void initCreatesTheTempFileInsideTheConfiguredTempDirAndCreatesTheDirectory() throws IOException {
+        Path base = Files.createTempDirectory("upload-tmp-test-");
+        Path dir = base.resolve("nested/upload-tmp");
+        when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
+
+        UploadSession session = serviceWithTempDir(dir)
+                .init(officer, batchId, new InitUploadSessionDto("a.txt", "", "a.txt", 5L, "text/plain", null));
+        createdTempFile = Path.of(session.getTempFilePath());
+
+        assertThat(createdTempFile.getParent()).isEqualTo(dir.toAbsolutePath().normalize());
+        assertThat(Files.exists(createdTempFile)).isTrue();
+        Files.deleteIfExists(createdTempFile);
+        Files.deleteIfExists(dir);
+        Files.deleteIfExists(dir.getParent());
+        Files.deleteIfExists(base);
+        createdTempFile = null;
+    }
+
+    @Test
+    void appendChunkOnASessionWhoseTempFileIsOutsideTheTempDirIsRejectedAs409AndWritesNothing() throws IOException {
+        UploadSession session = openSession(10, 5, 0, null); // file lives under java.io.tmpdir
+        Path otherDir = Files.createTempDirectory("upload-tmp-other-");
+        when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
+        when(uploadSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+
+        for (int i = 0; i < 2; i++) { // repeated attempts keep failing the same way
+            assertThatThrownBy(() -> serviceWithTempDir(otherDir)
+                            .appendChunk(officer, sessionId, 0, new ByteArrayInputStream("hi".getBytes(StandardCharsets.UTF_8))))
+                    .isInstanceOf(ApiException.class)
+                    .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("UPLOAD_SESSION_NOT_OPEN"));
+        }
+        assertThat(Files.size(Path.of(session.getTempFilePath()))).isZero();
+        assertThat(session.getStatus()).isEqualTo(UploadSessionStatus.OPEN);
+        Files.deleteIfExists(otherDir);
+    }
+
+    @Test
+    void appendChunkWhenTheTempFileIsGoneIsRejectedAndDoesNotRecreateIt() throws IOException {
+        UploadSession session = openSession(10, 5, 3, new byte[] {1, 2, 3});
+        Files.delete(Path.of(session.getTempFilePath()));
+        when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
+        when(uploadSessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(session));
+
+        assertThatThrownBy(() -> service.appendChunk(
+                        officer, sessionId, 3, new ByteArrayInputStream("hi".getBytes(StandardCharsets.UTF_8))))
+                .isInstanceOf(ApiException.class)
+                .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("UPLOAD_SESSION_NOT_OPEN"));
+        assertThat(Files.exists(Path.of(session.getTempFilePath()))).isFalse();
+    }
+
+    @Test
+    void completeOnASessionWhoseTempFileIsOutsideTheTempDirIsRejected() throws IOException {
+        UploadSession session = openSession(5, 5, 5, "hello".getBytes(StandardCharsets.UTF_8));
+        Path otherDir = Files.createTempDirectory("upload-tmp-other-");
+        when(uploadSessionRepository.findByIdAndCreatedBySub(sessionId, officer.sub())).thenReturn(Optional.of(session));
+        when(uploadBatchService.loadOpenBatch(batchId)).thenReturn(batch(BatchKind.WAREHOUSE));
+
+        assertThatThrownBy(() -> serviceWithTempDir(otherDir).complete(officer, sessionId))
+                .isInstanceOf(ApiException.class)
+                .satisfies(ex -> assertThat(codeOf(ex)).isEqualTo("UPLOAD_SESSION_NOT_OPEN"));
+        verify(documentsService, never()).ingestBatchFile(any(), any(), any(), any(), any(), any());
+        Files.deleteIfExists(otherDir);
     }
 
     // ---- complete (§4.4) ------------------------------------------------------

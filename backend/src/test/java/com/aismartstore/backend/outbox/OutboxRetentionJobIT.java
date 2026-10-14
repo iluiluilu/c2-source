@@ -35,7 +35,7 @@ import org.testcontainers.utility.DockerImageName;
  * test - Outbox: ... retention job xoá đúng row processed_at quá hạn, không
  * xoá row chưa xử lý, log cảnh báo backlog"), Task 9b.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, properties = "app.scheduling.enabled=false")
 @AutoConfigureMockMvc
 @Testcontainers
 class OutboxRetentionJobIT {
@@ -81,8 +81,14 @@ class OutboxRetentionJobIT {
     @MockBean
     private ObjectStorageService objectStorageService;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate shedlockJdbc;
+
     @BeforeEach
     void resetState() throws Exception {
+        // backend-multi-instance: the context's own scheduler already ticked this job at startup and holds its
+        // ShedLock row for lockAtLeastFor; expire it (UPDATE, not DELETE: ShedLock caches that the row exists) so the direct call below runs the job body.
+        shedlockJdbc.update("UPDATE shedlock SET lock_until = timezone('utc', now()) - interval '1 minute'");
         outboxEventRepository.deleteAll();
         setConfig("classification.outbox_retention_days", 30);
     }

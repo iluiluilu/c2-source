@@ -19,6 +19,72 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+# backend-multi-instance: 1 image, 2 role chon bang SPRING_PROFILES_ACTIVE.
+#   backend        = role api    (2 replica sau nginx round-robin; khong job nen, khong consume queue)
+#   backend-worker = role worker (1 replica; job nen + consumer q.embed/q.result)
+# Khai bao queue (RabbitConfig) o CA HAI role, cung image -> tham so queue khong lech (tranh 406).
+x-backend-env: &backend-env
+  PORT: 3001
+  # http://AUTH_DOMAIN (khong co port) - phai khop tuyet doi voi issuer
+  # (`iss`) ma browser thay khi dang nhap qua nginx, xem nginx/conf.d/auth.conf.
+  KEYCLOAK_AUTH_SERVER_URL: http://${AUTH_DOMAIN}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+  KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: ${POSTGRES_USER}
+  DB_PASSWORD: ${POSTGRES_PASSWORD}
+  DB_NAME: ${POSTGRES_DB}
+  S3_ENDPOINT: http://seaweedfs:8333
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+  S3_BUCKET: ${S3_BUCKET}
+  S3_PERSONAL_BUCKET: ${S3_PERSONAL_BUCKET}
+  S3_REGION: ${S3_REGION}
+  CLAMD_HOST: clamav
+  CLAMD_PORT: "3310"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  MAX_UPLOAD_BYTES: "2147483648"
+  OPENSEARCH_HOST: opensearch
+  OPENSEARCH_PORT: "9200"
+  OPENSEARCH_SCHEME: https
+  OPENSEARCH_USERNAME: admin
+  OPENSEARCH_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6334"
+  QDRANT_URL: http://qdrant:6333
+  RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+  # digitization-pipeline-01-source-dispatch.md Task 0: spring.rabbitmq.*
+  # (application.yml) reads these discrete vars, not RABBITMQ_URL above -
+  # default host/port (localhost:5672) would be wrong inside this
+  # container's own network namespace.
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+  RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+  # backend-multi-instance: SEMANTIC_ENABLED PHAI cung gia tri o api va worker (cung anchor nay).
+  SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
+  EMBEDDING_API_URL: ${EMBEDDING_API_URL:-}
+  UPLOAD_TEMP_DIR: /data/upload-tmp
+
+x-backend-depends: &backend-depends
+  keycloak:
+    condition: service_started
+  postgres:
+    condition: service_healthy
+  seaweedfs:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  opensearch:
+    condition: service_healthy
+  qdrant:
+    condition: service_started
+  rabbitmq:
+    condition: service_healthy
+
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:24.0.0
@@ -199,67 +265,40 @@ services:
       timeout: 10s
       retries: 5
 
+  # Role api: phuc vu HTTP. Khong publish port (nginx proxy_pass toi backend:3001, Docker DNS tra ve ca 2 replica).
   backend:
     image: ${API_IMAGE}
     restart: unless-stopped
     logging: *default-logging
     environment:
-      PORT: 3001
-      # http://AUTH_DOMAIN (khong co port) - phai khop tuyet doi voi issuer
-      # (`iss`) ma browser thay khi dang nhap qua nginx, xem nginx/conf.d/auth.conf.
-      KEYCLOAK_AUTH_SERVER_URL: http://${AUTH_DOMAIN}
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
-      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
-      KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
-      S3_ENDPOINT: http://seaweedfs:8333
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
-      S3_BUCKET: ${S3_BUCKET}
-      S3_PERSONAL_BUCKET: ${S3_PERSONAL_BUCKET}
-      S3_REGION: ${S3_REGION}
-      CLAMD_HOST: clamav
-      CLAMD_PORT: "3310"
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      MAX_UPLOAD_BYTES: "2147483648"
-      OPENSEARCH_HOST: opensearch
-      OPENSEARCH_PORT: "9200"
-      OPENSEARCH_SCHEME: https
-      OPENSEARCH_USERNAME: admin
-      OPENSEARCH_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: "6334"
-      QDRANT_URL: http://qdrant:6333
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      # digitization-pipeline-01-source-dispatch.md Task 0: spring.rabbitmq.*
-      # (application.yml) reads these discrete vars, not RABBITMQ_URL above -
-      # default host/port (localhost:5672) would be wrong inside this
-      # container's own network namespace.
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
-    depends_on:
-      keycloak:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      seaweedfs:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    # Khong publish port: chi nginx (proxy_pass toi backend:3001) duoc truy cap tu ngoai.
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: api
+      # Ngan sach semantic query 8 / so replica api (2) = 4 moi replica.
+      SEMANTIC_QUERY_CONCURRENCY: "4"
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65
+    deploy:
+      replicas: 2
+    mem_limit: 1g
+    # Doi toi da 320s (spring.lifecycle.timeout-per-shutdown-phase) + du dia de JVM thoat.
+    stop_grace_period: 330s
+    volumes:
+      - upload-tmp:/data/upload-tmp
+    depends_on: *backend-depends
+
+  # Role worker: job nen (ShedLock/advisory lock) + consumer RabbitMQ. 1 replica.
+  backend-worker:
+    image: ${API_IMAGE}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *backend-env
+      SPRING_PROFILES_ACTIVE: worker
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=65
+    mem_limit: 1536m
+    stop_grace_period: 330s
+    volumes:
+      - upload-tmp:/data/upload-tmp
+    depends_on: *backend-depends
 
   web:
     image: ${WEB_IMAGE}
@@ -308,3 +347,6 @@ volumes:
   opensearch_data:
   qdrant_data:
   rabbitmq_data:
+  # backend-multi-instance: tempfile chunk upload dung chung giua cac replica api va worker.
+  # CANH BAO: `docker compose down -v` xoa volume nay va lam hong cac phien upload dang mo.
+  upload-tmp:

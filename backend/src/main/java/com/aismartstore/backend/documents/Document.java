@@ -138,6 +138,10 @@ public class Document {
     @Column(name = "purging_started_at")
     private OffsetDateTime purgingStartedAt;
 
+    /** backend-multi-instance Task 8: last embed.requested publish (semantic reconciliation grace window). */
+    @Column(name = "embed_requested_at")
+    private OffsetDateTime embedRequestedAt;
+
     /**
      * Snapshot of the deleted ancestor folder's {@code path_ids ++ [id]}
      * (root -> leaf), taken by {@code WarehouseService#deleteFolder} at the
@@ -297,6 +301,14 @@ public class Document {
 
     public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public OffsetDateTime getEmbedRequestedAt() {
+        return embedRequestedAt;
+    }
+
+    public void setEmbedRequestedAt(OffsetDateTime embedRequestedAt) {
+        this.embedRequestedAt = embedRequestedAt;
     }
 
     public OffsetDateTime getDeletedAt() {

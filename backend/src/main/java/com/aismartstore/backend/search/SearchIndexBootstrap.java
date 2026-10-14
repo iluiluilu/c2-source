@@ -27,7 +27,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * search-fulltext-01-tim-kiem-co-ban.md Task 3: creates the {@code
- * segment-v1}/{@code document-v1} physical indices (mapping §2) and their
+ * segment-v2}/{@code document-v1} physical indices (mapping §2) and their
  * {@code segment}/{@code document} aliases on startup, if they do not already
  * exist. Idempotent (checked via {@code indices().exists}) so it is safe to
  * run on every boot in every environment - deliberately plain Java on the
@@ -73,7 +73,8 @@ public class SearchIndexBootstrap implements ApplicationRunner {
             createIfAbsent(
                     SearchIndexNames.SEGMENT_PHYSICAL_INDEX,
                     SearchIndexNames.SEGMENT_ALIAS,
-                    "search/segment-v1-index.json");
+                    "search/segment-v2-index.json");
+            ensureEmbedTextHashMapping(SearchIndexNames.SEGMENT_PHYSICAL_INDEX);
             createIfAbsent(
                     SearchIndexNames.DOCUMENT_PHYSICAL_INDEX,
                     SearchIndexNames.DOCUMENT_ALIAS,
@@ -81,6 +82,36 @@ public class SearchIndexBootstrap implements ApplicationRunner {
         } finally {
             // One-shot startup step - nothing else uses this executor afterwards.
             executor.shutdownNow();
+        }
+    }
+
+    /**
+     * backend-multi-instance Task 14: {@code embed_text_hash} was added to the segment mapping after segment-v2
+     * was created on stg/prod - an additive put-mapping (idempotent) instead of a new index version.
+     */
+    private void ensureEmbedTextHashMapping(String physicalIndex) {
+        try {
+            boolean exists = withTimeout(() -> client.indices().exists(e -> e.index(physicalIndex)).value());
+            if (!exists) {
+                return; // createIfAbsent creates it with the field already in the mapping file.
+            }
+            withTimeout(() -> {
+                try (Response response = client.generic()
+                        .execute(Requests.create(
+                                "PUT",
+                                "/" + physicalIndex + "/_mapping",
+                                List.of(),
+                                Map.of(),
+                                Bodies.json("{\"properties\":{\"embed_text_hash\":{\"type\":\"keyword\"}}}")))) {
+                    if (response.getStatus() >= 300) {
+                        throw new IOException("PUT /" + physicalIndex + "/_mapping failed: " + response.getStatus());
+                    }
+                    return null;
+                }
+            });
+        } catch (IOException | RuntimeException e) {
+            log.error("Failed to add embed_text_hash mapping to '{}' - vector writes stay unconditional until fixed",
+                    physicalIndex, e);
         }
     }
 
@@ -92,7 +123,19 @@ public class SearchIndexBootstrap implements ApplicationRunner {
                 return;
             }
 
-            String body = buildCreateIndexBody(mappingResourcePath, alias);
+            // search-semantic (SPEC-search-semantic T4, search-semantic.md §9): never attach the alias to a
+            // second index while another physical index (segment-v1) already serves it with live data - a
+            // multi-index alias breaks writes. The new index is created un-aliased; the operator follows the
+            // reindex + atomic `_aliases` swap runbook (docs/00-overview, "reindex segment-v2").
+            boolean aliasHeldElsewhere = withTimeout(() -> client.indices().existsAlias(a -> a.name(alias)).value());
+            String body = buildCreateIndexBody(mappingResourcePath, aliasHeldElsewhere ? null : alias);
+            if (aliasHeldElsewhere) {
+                log.warn(
+                        "OpenSearch alias '{}' is already served by another physical index - creating '{}' WITHOUT "
+                                + "the alias. Reindex the old index into '{}' and swap the alias atomically "
+                                + "(see the segment-v2 reindex runbook); semantic search stays unavailable until then.",
+                        alias, physicalIndex, physicalIndex);
+            }
             withTimeout(() -> {
                 try (Response response = client.generic()
                         .execute(Requests.create(
@@ -176,6 +219,7 @@ public class SearchIndexBootstrap implements ApplicationRunner {
         if (settings == null || mappings == null) {
             throw new IOException("Missing 'settings' or 'mappings' in " + resourcePath);
         }
-        return "{\"settings\":" + settings + ",\"mappings\":" + mappings + ",\"aliases\":{\"" + alias + "\":{}}}";
+        String aliases = alias == null ? "{}" : "{\"" + alias + "\":{}}";
+        return "{\"settings\":" + settings + ",\"mappings\":" + mappings + ",\"aliases\":" + aliases + "}";
     }
 }

@@ -97,6 +97,21 @@ public final class SystemConfigDefaults {
     public static final String SEARCH_MAX_RESULTS_PER_PAGE = "search.max_results_per_page";
     /** search-fulltext-01-tim-kiem-co-ban.md §3.1/§4/Task 8: OpenSearch query timeout before failing the request (AC-10). */
     public static final String SEARCH_QUERY_TIMEOUT_MS = "search.query_timeout_ms";
+    /** search-semantic T3: number of k-NN / lexical candidates per branch (1..200). */
+    public static final String SEMANTIC_TOP_K = "semantic.top_k";
+    /**
+     * search-semantic T3 (Q-9): cosine threshold in [0,1] below which a vector-only candidate is
+     * never returned (AC-3). Stored as a decimal STRING ("0.50") because NUMBER values are integers.
+     */
+    public static final String SEMANTIC_MIN_SCORE = "semantic.min_score";
+
+    /** SPEC-export-reporting §2: reporting.* (6 keys, registry in code - no DB seed). */
+    public static final String REPORTING_EXPORT_TTL_DAYS = "reporting.export_ttl_days";
+    public static final String REPORTING_MAX_ROWS_PER_EXPORT = "reporting.max_rows_per_export";
+    public static final String REPORTING_MAX_CONCURRENT_EXPORTS = "reporting.max_concurrent_exports";
+    public static final String REPORTING_MAX_EXPORTS_PER_USER = "reporting.max_exports_per_user";
+    public static final String REPORTING_QUERY_TIMEOUT_SECONDS = "reporting.query_timeout_seconds";
+    public static final String REPORTING_MAX_BUCKETS = "reporting.max_buckets";
 
     private static final long GB = 1024L * 1024L * 1024L;
     private static final long MB = 1024L * 1024L;
@@ -202,6 +217,27 @@ public final class SystemConfigDefaults {
                 "Số kết quả mặc định mỗi trang tìm kiếm toàn văn (tối đa cứng 50)", "kết quả"));
         add(new SystemConfigDef(SEARCH_QUERY_TIMEOUT_MS, ValueType.NUMBER, "1500", false,
                 "Thời gian chờ tối đa cho một truy vấn OpenSearch trước khi báo lỗi", "ms"));
+
+        // Semantic search (SPEC-search-semantic T3) - not sensitive: wrong values only change recall/precision.
+        add(new SystemConfigDef(SEMANTIC_TOP_K, ValueType.NUMBER, "50", false,
+                "Số ứng viên tối đa mỗi nhánh (từ khoá / ngữ nghĩa) trong tra cứu ngữ nghĩa (tối đa 200)", "kết quả"));
+        add(new SystemConfigDef(SEMANTIC_MIN_SCORE, ValueType.STRING, "0.50", false,
+                "Ngưỡng tương đồng cosine tối thiểu (0–1) để một đoạn chỉ khớp ngữ nghĩa được coi là đủ căn cứ", null));
+
+        // Reporting/export (SPEC-export-reporting §2) - not sensitive: wrong values only affect
+        // report availability/load, never data safety.
+        add(new SystemConfigDef(REPORTING_EXPORT_TTL_DAYS, ValueType.NUMBER, "7", false,
+                "Số ngày giữ tệp báo cáo đã xuất trước khi hết hạn", "ngày"));
+        add(new SystemConfigDef(REPORTING_MAX_ROWS_PER_EXPORT, ValueType.NUMBER, "100000", false,
+                "Số dòng tối đa của một báo cáo xuất tệp", "dòng"));
+        add(new SystemConfigDef(REPORTING_MAX_CONCURRENT_EXPORTS, ValueType.NUMBER, "10", false,
+                "Số job xuất báo cáo đang tạo đồng thời tối đa toàn hệ thống", "job"));
+        add(new SystemConfigDef(REPORTING_MAX_EXPORTS_PER_USER, ValueType.NUMBER, "3", false,
+                "Số job xuất báo cáo đang tạo đồng thời tối đa mỗi người", "job"));
+        add(new SystemConfigDef(REPORTING_QUERY_TIMEOUT_SECONDS, ValueType.NUMBER, "15", false,
+                "Thời gian chờ tối đa cho một truy vấn thống kê", "giây"));
+        add(new SystemConfigDef(REPORTING_MAX_BUCKETS, ValueType.NUMBER, "400", false,
+                "Số mốc thời gian tối đa của một báo cáo theo độ chi tiết đã chọn", "mốc"));
     }
 
     private SystemConfigDefaults() {

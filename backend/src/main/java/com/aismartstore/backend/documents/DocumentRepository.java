@@ -30,7 +30,8 @@ public interface DocumentRepository
     List<UUID> findLiveSourcePersonalFileIdsByUploader(
             @org.springframework.data.repository.query.Param("uploaderSub") String uploaderSub);
 
-    List<Document> findBySha256AndStatus(String sha256, String status);
+    /** Duplicate-content warning (feedbacks D-09): live documents only - one sitting in the trash is not "in the warehouse". */
+    List<Document> findBySha256AndStatusAndDeletedAtIsNull(String sha256, String status);
 
     /**
      * SPEC-folder-upload-display-name: same expression/predicate as {@code UQ_document_display_name_alive}
@@ -200,4 +201,10 @@ public interface DocumentRepository
     @Query("update Document d set d.purgeState = 'deleted', d.purgingStartedAt = null "
             + "where d.purgeState = 'purging' and d.purgingStartedAt <= :cutoff")
     int recoverStuckPurging(@Param("cutoff") OffsetDateTime cutoff);
+
+    /** backend-multi-instance Task 8: stamped after each successful embed.requested publish. */
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("update Document d set d.embedRequestedAt = :at where d.id = :id")
+    int markEmbedRequested(@Param("id") UUID id, @Param("at") OffsetDateTime at);
 }

@@ -71,7 +71,7 @@ import org.testcontainers.utility.DockerImageName;
  * pending}) is exercised at the unit level in {@code
  * DigitizationDispatchServiceTest#publishExceptionIsSwallowedAndKeepsPending}.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, properties = "app.scheduling.enabled=false")
 @AutoConfigureMockMvc
 @Testcontainers
 class DigitizationDispatchIT {
@@ -165,8 +165,14 @@ class DigitizationDispatchIT {
     private static final byte[] DOC_BYTES = {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0, 0, 0, 0, 0};
     private static final byte[] MP4_BYTES = {0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'};
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate shedlockJdbc;
+
     @BeforeEach
     void resetState() throws Exception {
+        // backend-multi-instance: the context's own scheduler already ticked this job at startup and holds its
+        // ShedLock row for lockAtLeastFor; expire it (UPDATE, not DELETE: ShedLock caches that the row exists) so the direct call below runs the job body.
+        shedlockJdbc.update("UPDATE shedlock SET lock_until = timezone('utc', now()) - interval '1 minute'");
         digitizationRunRepository.deleteAll();
         digitizationSourceRepository.deleteAll();
         sourceSeparationJobRepository.deleteAll();

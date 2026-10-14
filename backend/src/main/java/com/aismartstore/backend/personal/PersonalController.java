@@ -189,7 +189,7 @@ public class PersonalController {
             @RequestParam(required = false, defaultValue = "") String relativePath,
             @RequestParam(required = false) String displayName) {
         if (file.isEmpty()) {
-            throw new BadRequestException("Missing 'file' field");
+            throw new BadRequestException("Thiếu tệp tải lên (trường 'file')");
         }
         PersonalFile saved =
                 personalService.uploadFileInBatch(user, batchId, folderId, file, relativePath, displayName);
@@ -284,7 +284,7 @@ public class PersonalController {
 
     private static String asName(Object value) {
         if (!(value instanceof String s) || s.isBlank() || s.length() > 255) {
-            throw new BadRequestException("name must be a non-blank string of at most 255 characters");
+            throw new BadRequestException("Tên không được để trống và tối đa 255 ký tự");
         }
         return s;
     }
@@ -293,7 +293,7 @@ public class PersonalController {
         try {
             return UUID.fromString(String.valueOf(value));
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException("parentId must be a valid UUID");
+            throw new BadRequestException("Thư mục cha không hợp lệ");
         }
     }
 }

@@ -192,7 +192,7 @@ public class PersonalService {
             folderRepository.save(folder);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A folder with this name already exists at this level");
+                throw new ConflictException("Đã có thư mục cùng tên ở cấp này");
             }
             throw e;
         }
@@ -211,7 +211,7 @@ public class PersonalService {
         if (moved) {
             if (parentId != null) {
                 if (parentId.equals(id)) {
-                    throw new UnprocessableEntityException("Cannot move a folder into itself");
+                    throw new UnprocessableEntityException("Không thể chuyển thư mục vào chính nó");
                 }
                 findOwnedFolder(user, parentId);
                 assertNotDescendant(user, id, parentId);
@@ -227,7 +227,7 @@ public class PersonalService {
             folderRepository.save(folder);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A folder with this name already exists at this level");
+                throw new ConflictException("Đã có thư mục cùng tên ở cấp này");
             }
             throw e;
         }
@@ -251,7 +251,7 @@ public class PersonalService {
             folderRepository.deleteById(id);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isForeignKeyViolation(e)) {
-                throw new ConflictException("Folder still contains subfolders or files");
+                throw new ConflictException("Thư mục còn chứa thư mục con hoặc tệp. Hãy xoá hoặc chuyển hết nội dung trước khi xoá thư mục.");
             }
             throw e;
         }
@@ -263,7 +263,7 @@ public class PersonalService {
         UUID currentId = candidateId;
         while (currentId != null) {
             if (currentId.equals(folderId)) {
-                throw new UnprocessableEntityException("Cannot move a folder into its own subtree");
+                throw new UnprocessableEntityException("Không thể chuyển thư mục vào thư mục con của nó");
             }
             currentId = folderRepository
                     .findByIdAndOwnerSub(currentId, user.sub())
@@ -274,7 +274,7 @@ public class PersonalService {
 
     private PersonalFolder findOwnedFolder(KeycloakUser user, UUID id) {
         return folderRepository.findByIdAndOwnerSub(id, user.sub())
-                .orElseThrow(() -> new NotFoundException("Folder not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục"));
     }
 
     // ----------------------------------------------------------------- batches
@@ -356,7 +356,7 @@ public class PersonalService {
      */
     private UploadBatch findOwnedBatch(KeycloakUser user, UUID batchId) {
         return uploadBatchRepository.findByIdAndOwnerSubAndKind(batchId, user.sub(), BatchKind.PERSONAL)
-                .orElseThrow(() -> new NotFoundException("Batch not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy lượt tải"));
     }
 
     /**
@@ -462,7 +462,7 @@ public class PersonalService {
 
             ClamdService.ScanVerdict verdict = scan(tempFile);
             if (!verdict.clean()) {
-                String reason = "malware detected (" + verdict.signature() + ")";
+                String reason = "phát hiện mã độc (" + verdict.signature() + ")";
                 auditReject(user, originalName, sha256, size, reason);
                 throw malwareDetected("File rejected: " + reason);
             }
@@ -619,7 +619,7 @@ public class PersonalService {
 
     private PersonalFile findOwnedFile(KeycloakUser user, UUID id) {
         return fileRepository.findByIdAndOwnerSub(id, user.sub())
-                .orElseThrow(() -> new NotFoundException("File not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tệp"));
     }
 
     /** Rejected uploads persist no row; the audit event is the only trace. */

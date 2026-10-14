@@ -48,7 +48,7 @@ public class PageImageRenderer {
      */
     public PageImage render(Document document, int pageNo) {
         if (document.getStorageKey() == null) {
-            throw new NotFoundException("document has no stored original content: " + document.getId());
+            throw new NotFoundException("Tài liệu không có nội dung gốc được lưu trữ: " + document.getId());
         }
 
         String mimeType = document.getMimeType();
@@ -56,21 +56,21 @@ public class PageImageRenderer {
             return renderPdfPage(document, pageNo);
         } else if (mimeType != null && mimeType.startsWith("image/")) {
             if (pageNo != 1) {
-                throw new NotFoundException("page " + pageNo + " does not exist for a single-image source");
+                throw new NotFoundException("Trang " + pageNo + " không tồn tại (tệp ảnh chỉ có 1 trang)");
             }
             return new PageImage(readObject(document), MediaType.parseMediaType(mimeType));
         } else {
-            throw new NotFoundException("Not a page-renderable mime type: " + mimeType);
+            throw new NotFoundException("Định dạng không hiển thị được theo trang: " + mimeType);
         }
     }
 
     private PageImage renderPdfPage(Document document, int pageNo) {
         if (pageNo < 1) {
-            throw new NotFoundException("pageNo must be >= 1");
+            throw new NotFoundException("Số trang phải lớn hơn hoặc bằng 1");
         }
         try (PDDocument pdf = Loader.loadPDF(readObject(document))) {
             if (pageNo > pdf.getNumberOfPages()) {
-                throw new NotFoundException("page " + pageNo + " does not exist in this PDF");
+                throw new NotFoundException("Trang " + pageNo + " không tồn tại trong tệp PDF này");
             }
             PDFRenderer renderer = new PDFRenderer(pdf);
             BufferedImage rendered = renderer.renderImageWithDPI(pageNo - 1, 150, ImageType.RGB);

@@ -63,7 +63,7 @@ import org.testcontainers.utility.DockerImageName;
  * the real {@link UploadCleanupJob} bean invoked directly (never waiting on
  * the real {@code fixedDelay}, per §5 "Cấu hình bổ sung").
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, properties = "app.scheduling.enabled=false")
 @AutoConfigureMockMvc
 @Testcontainers
 class UploadCleanupJobIT {
@@ -152,8 +152,14 @@ class UploadCleanupJobIT {
         return bytes;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate shedlockJdbc;
+
     @BeforeEach
     void resetState() throws Exception {
+        // backend-multi-instance: the context's own scheduler already ticked this job at startup and holds its
+        // ShedLock row for lockAtLeastFor; expire it (UPDATE, not DELETE: ShedLock caches that the row exists) so the direct call below runs the job body.
+        shedlockJdbc.update("UPDATE shedlock SET lock_until = timezone('utc', now()) - interval '1 minute'");
         uploadSessionRepository.deleteAll();
         digitizationSourceRepository.deleteAll();
         sourceSeparationJobRepository.deleteAll();
@@ -483,6 +489,8 @@ class UploadCleanupJobIT {
                 .count();
         assertThat(expiredAfterFirstRun).isEqualTo(500);
 
+        // lockAtLeastFor keeps the ShedLock row held after the first run; expire it to simulate the next cycle.
+        shedlockJdbc.update("UPDATE shedlock SET lock_until = timezone('utc', now()) - interval '1 minute'");
         uploadCleanupJob.run();
         long expiredAfterSecondRun = uploadSessionRepository.findAll().stream()
                 .filter(s -> UploadSessionStatus.EXPIRED.equals(s.getStatus()))

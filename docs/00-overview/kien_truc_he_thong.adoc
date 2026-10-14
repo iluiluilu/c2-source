@@ -1,0 +1,35 @@
+= Kiến trúc Hệ thống — Hệ thống Lưu trữ Dữ liệu Quy mô lớn và Xử lý Thông tin bằng AI
+
+_Tài liệu này (v1.1) được tách ra từ mục "5. Kiến trúc hệ thống" của `dac_ta_yeu_cau_chuc_nang_phi_chuc_nang.adoc` (SRS) để quản lý/cập nhật độc lập với phần đặc tả yêu cầu chức năng &amp; phi chức năng. Các mã FR-xx/NFR-xx được tham chiếu trong tài liệu này vẫn được định nghĩa đầy đủ trong SRS (mục NFR đã được rút gọn ở SRS bản v1.7, chỉ còn NFR-01–NFR-07). Mục này mô tả kiến trúc triển khai ở mức tham khảo — cách phân bổ phần mềm vừa khít trên cấu hình phần cứng đã được phê duyệt, đồng thời cho thấy các yêu cầu chức năng (FR) và phi chức năng (NFR) được hiện thực hóa bởi những thành phần nào. Các con số dung lượng và sơ đồ đấu nối (1Gbps/25GbE) cần được xác nhận lại với C02 và bên thiết kế hạ tầng._
+
+'''
+
+== 1. Nguyên tắc kiến trúc và topo triển khai
+
+Nguyên tắc phân bổ: máy chủ AI lo tính toán nặng (GPU/CPU), máy chủ quản lý lo ứng dụng cùng cơ sở dữ liệu và chỉ mục, SAN là kho dữ liệu chính, NAS là đích sao lưu. Toàn hệ chạy on-premise trong VLAN cô lập, không kết nối Internet/BCAnet. Trao đổi lưu trữ (iSCSI tới SAN) và luồng AI ↔ quản lý đi trên mạng nội bộ 25GbE để tránh nghẽn khi nạp dữ liệu đa phương tiện dung lượng lớn. Hai GPU được phân vai rõ: một GPU phục vụ trực tuyến độ trễ thấp, một GPU dành cho xử lý nền theo lô.
+
+== 2. Sơ đồ triển khai
+- Update sau
+
+== 3. Phân bổ tài nguyên trên phần cứng đã cấp
+
+|===
+|Thành phần |Cấu hình |Vai trò trong hệ thống
+
+|Máy chủ AI |64C/128T · 128GB RAM · 2× GPU 24GB |Trục tính toán. GPU0: phục vụ trực tuyến (LLM ngữ nghĩa cỡ 7–14B lượng tử hóa, mô hình embedding, reranker). GPU1: xử lý nền theo lô (OCR, Speech-to-Text).64 nhân CPU: ingestion workers (giải nén, phân tích PDF/Office, chuẩn hóa định dạng, chia đoạn, trích frame video).
+|Máy chủ quản lý |48C/96T · 128GB RAM · 2× 3.84TB NVMe |Trục ứng dụng và dữ liệu: API Gateway, Keycloak (IAM/RBAC), dịch vụ ứng dụng, báo cáo, hàng đợi RabbitMQ; SeaweedFS (cổng S3, filer, volume) với filer store đặt trên PostgreSQL; PostgreSQL (metadata nghiệp vụ, tài khoản, nhật ký, nhãn, khóa API); OpenSearch (toàn văn và vector ngữ nghĩa) đặt chỉ mục trên NVMe/SSD.
+|SAN (dual controller, iSCSI 25GbE) |Tier SSD ~61TB raw + Tier HDD ~320TB raw |Kho dữ liệu chính. SSD: cơ sở dữ liệu, chỉ mục tìm kiếm, vùng làm việc OCR/STT, cache nóng. HDD (định dạng ZFS): volume của SeaweedFS chứa dữ liệu đa phương tiện và bản gốc.
+|NAS backup |≥140TB |Đích sao lưu (PostgreSQL gồm filer store, chỉ mục, cấu hình, bản gốc). Dung lượng nhỏ hơn SAN nên áp dụng sao lưu phân tầng (NFR-06 — Sao lưu &amp; phục hồi).
+|===
+
+== 4. Lớp lưu trữ: SeaweedFS trên ZFS
+
+Lớp lưu trữ gồm hai tầng có vai trò tách bạch, không chồng chéo.
+
+Tầng dưới là *ZFS trên LUN của SAN*. Máy chủ quản lý mount LUN qua iSCSI 25GbE và định dạng ZFS. ZFS đảm nhận: mã hóa khi lưu trữ (at-rest) bằng native encryption — một chỗ quản khóa duy nhất, không cần dựng KMS riêng cho object store (NFR-04 — Bảo mật &amp; phân quyền); toàn vẹn dữ liệu bằng checksum và scrub định kỳ chống hỏng âm thầm (bit-rot); bất biến và khôi phục bằng snapshot read-only theo copy-on-write làm lớp WORM chính (NFR-05 — Toàn vẹn dữ liệu); và sao lưu gia tăng sang NAS bằng `zfs send/receive` (NFR-06 — Sao lưu &amp; phục hồi).
+
+Tầng trên là *SeaweedFS (Apache 2.0) làm lớp object/S3*. Ứng dụng đọc/ghi dữ liệu qua S3 API chuẩn, đáp ứng yêu cầu kiến trúc mở và sẵn sàng liên thông (FR-32, FR-33). SeaweedFS dùng PostgreSQL làm filer store (kho metadata vị trí tệp), cung cấp Object Lock/WORM kèm Legal Hold ở tầng API, rồi ghi dữ liệu thực xuống dataset ZFS trên tier HDD.
+
+Phân vai để tránh làm thừa: không bật SSE của SeaweedFS chồng lên mã hóa ZFS (mã hóa hai lần chỉ tốn CPU); mã hóa at-rest giao cho ZFS, versioning và Object Lock giao cho SeaweedFS, còn tính bất biến cho dữ liệu gốc ưu tiên dùng snapshot và hold của ZFS làm lớp chính.
+
+Lưu ý vận hành quan trọng: vì SeaweedFS tách metadata (filer store trong PostgreSQL) khỏi dữ liệu (trên ZFS), khi sao lưu/khôi phục phải bảo đảm hai phần khớp nhau về thời điểm — ưu tiên chụp snapshot ZFS và dump PostgreSQL gần như đồng thời — nếu không sẽ phát sinh object "mồ côi" khi khôi phục (NFR-06 — Sao lưu &amp; phục hồi). Nguyên tắc bảo toàn chứng cứ vẫn được giữ: bản gốc lưu write-once, hash SHA-256 lưu trong metadata nghiệp vụ, mọi truy cập/chỉnh sửa được ghi vào nhật ký chống sửa (FR-09, NFR-05 — Toàn vẹn dữ liệu).

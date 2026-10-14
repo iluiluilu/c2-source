@@ -1,6 +1,8 @@
 package com.aismartstore.backend.audit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
@@ -47,7 +49,14 @@ public class AuditService {
      */
     public static final String AUDIT_RECORDED_ATTRIBUTE = "AUDIT_RECORDED";
 
-    private static final ObjectMapper JSON = new ObjectMapper();
+    /**
+     * JavaTimeModule: request metadata may carry {@code LocalDate}/{@code OffsetDateTime} values (e.g. the search
+     * filters' {@code uploadedFrom/uploadedTo}) - without it every such entry failed to normalize and was never
+     * written (FR-09 gap). Dates are written as ISO-8601 strings, which also keeps the sealing JSON readable.
+     */
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     /**
      * classification-notes-02-notes.md §4 step 6 / §8 câu hỏi #2 (đã CHỐT):
@@ -55,28 +64,39 @@ public class AuditService {
      * (a.k.a. {@code eventType}). Only actions registered here are checked -
      * every other action keeps today's behaviour unchanged.
      */
-    private static final Map<String, Set<String>> ALLOWED_METADATA_KEYS = Map.of(
-            "note.create", Set.of("documentId", "noteId"),
-            "note.update", Set.of("documentId", "noteId"),
+    private static final Map<String, Set<String>> ALLOWED_METADATA_KEYS = Map.ofEntries(
+            Map.entry("note.create", Set.of("documentId", "noteId")),
+            Map.entry("note.update", Set.of("documentId", "noteId")),
             // search-fulltext-04-dong-bo-chi-muc.md Task 7: `query` is already truncated to
             // <=200 chars by the caller (SearchServiceImpl) before it ever reaches this
             // allowlist - it is never relied upon here to bound the value's length.
-            "search.executed", Set.of("query", "filters", "resultCount", "sort", "droppedGroupIds"),
+            Map.entry("search.executed", Set.of("query", "filters", "resultCount", "sort", "droppedGroupIds",
+                    // search-semantic T3 (AC-7.1): FR-24 queries are audited under the same action.
+                    "mode", "degradedMode", "minScore")),
             // digitization-review-03-ownership-transfer.md §2: written synchronously
             // (record(), not recordAsync) by DocumentOwnershipService.transfer().
-            "document.ownership_transferred", Set.of("fromUploaderSub", "toUploaderSub", "reason"),
+            Map.entry("document.ownership_transferred", Set.of("fromUploaderSub", "toUploaderSub", "reason")),
             // digitization-review-01-ocr.md §4 bước 3 / BA AC-6 US2: edited/added/deleted segment
             // text must never reach audit_log, only a magnitude signal - see
             // DigitizationRunLifecycleServiceImpl.charsChanged().
-            "digitization_review.segment_revised",
-                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt"),
-            "digitization_review.segment_deleted",
-                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt"),
-            "digitization_review.segment_added",
-                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt"),
+            Map.entry("digitization_review.segment_revised",
+                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt")),
+            Map.entry("digitization_review.segment_deleted",
+                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt")),
+            Map.entry("digitization_review.segment_added",
+                    Set.of("segmentId", "revisionNo", "charsChanged", "editedBy", "editedAt")),
             // digitization-review-01-ocr.md §4 bước 4: "ghi audit_log(digitization_review.confirmed)
             // (actor, documentId, runId, confirmSource)" - exact metadata list from the spec.
-            "digitization_review.confirmed", Set.of("documentId", "runId", "confirmSource"));
+            Map.entry("digitization_review.confirmed", Set.of("documentId", "runId", "confirmSource")),
+            // export-reporting SPEC T3 (AC-34/35): chỉ id/tham số đã chuẩn hoá + số đo - KHÔNG số liệu,
+            // KHÔNG tên nhãn/nhóm/thư mục/tài liệu.
+            Map.entry("report.generate",
+                    Set.of("template_code", "params", "row_count", "duration_ms")),
+            Map.entry("report.export",
+                    Set.of("template_code", "format", "params", "row_count", "duration_ms", "export_id",
+                            "result", "retry_of")),
+            Map.entry("report.download", Set.of("template_code", "format", "export_id")),
+            Map.entry("report.access_denied", Set.of("permission", "reason", "export_id", "template_code")));
 
     private final AuditLogRepository repository;
     private final JdbcTemplate jdbcTemplate;

@@ -76,13 +76,13 @@ public class AllowlistService {
         AllowlistEntry entry =
                 loadEntries().stream().filter(e -> e.mimeType().equals(mimeType)).findFirst().orElse(null);
         if (entry == null) {
-            return FormatCheck.reject("File type '" + mimeType + "' is not accepted");
+            return FormatCheck.reject("Định dạng tệp không được phép nạp vào kho (" + mimeType + ")");
         }
 
         String extension = extractExtension(originalName);
         if (!entry.extensions().contains(extension)) {
             return FormatCheck.reject(
-                    "Extension '." + extension + "' does not match declared type '" + mimeType + "'");
+                    "Đuôi tệp '." + extension + "' không khớp với định dạng khai báo (" + mimeType + ")");
         }
 
         List<Map<String, Object>> signatures = entry.magicBytes();
@@ -90,7 +90,8 @@ public class AllowlistService {
             byte[] header = readHeader(file, 16);
             boolean matched = signatures.stream().anyMatch(m -> matches(header, m));
             if (!matched) {
-                return FormatCheck.reject("File content does not match declared type '" + mimeType + "'");
+                return FormatCheck.reject("Nội dung tệp không khớp với định dạng khai báo (." + extension
+                        + "). Tệp có thể đã bị đổi đuôi nên bị từ chối.");
             }
         }
 
@@ -142,7 +143,7 @@ public class AllowlistService {
             String category,
             List<Map<String, Object>> magicBytes) {
         if (repository.existsById(mimeType)) {
-            throw new ConflictException("Format '" + mimeType + "' already exists");
+            throw new ConflictException("Định dạng '" + mimeType + "' đã tồn tại");
         }
         AllowedFileFormat row = new AllowedFileFormat();
         row.setMimeType(mimeType);
@@ -161,7 +162,7 @@ public class AllowlistService {
 
     public void delete(String mimeType) {
         if (!repository.existsById(mimeType)) {
-            throw new NotFoundException("Format '" + mimeType + "' not found");
+            throw new NotFoundException("Định dạng '" + mimeType + "' không tồn tại");
         }
         repository.deleteById(mimeType);
         refreshCache();

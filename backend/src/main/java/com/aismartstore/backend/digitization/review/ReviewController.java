@@ -346,10 +346,10 @@ public class ReviewController {
     private DigitizationRun requireOwnedReviewableRun(UUID runId, KeycloakUser user) {
         DigitizationRun run = digitizationRunRepository.findById(runId)
                 .filter(r -> REVIEWABLE_TASKS.contains(r.getTask()))
-                .orElseThrow(() -> new NotFoundException("digitization_run not found: " + runId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy lượt số hoá: " + runId));
         Document document = requireDocument(run.getDocumentId());
         if (!document.getUploaderSub().equals(user.sub())) {
-            throw new ForbiddenException("Not the uploader of document " + document.getId());
+            throw new ForbiddenException("Bạn không phải người nạp tài liệu " + document.getId());
         }
         return run;
     }
@@ -367,7 +367,7 @@ public class ReviewController {
         DigitizationRun run = digitizationRunRepository.findById(runId)
                 .filter(r -> REVIEWABLE_TASKS.contains(r.getTask()))
                 .filter(r -> DigitizationRun.REVIEW_CONFIRMED.equals(r.getReviewState()))
-                .orElseThrow(() -> new NotFoundException("digitization_run not found: " + runId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy lượt số hoá: " + runId));
         documentScopeGuard.requireVisible(user, run.getDocumentId());
         return run;
     }
@@ -412,12 +412,12 @@ public class ReviewController {
 
     private ContentSegment requireSegment(UUID segmentId) {
         return contentSegmentRepository.findById(segmentId)
-                .orElseThrow(() -> new NotFoundException("content_segment not found: " + segmentId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đoạn nội dung: " + segmentId));
     }
 
     private Document requireDocument(UUID documentId) {
         return documentRepository.findById(documentId)
-                .orElseThrow(() -> new NotFoundException("document not found: " + documentId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài liệu: " + documentId));
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.aismartstore.backend.systemconfig;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -111,5 +112,42 @@ class SystemConfigValidatorTest {
                         SystemConfigValue.of(ValueType.STRING, "abc 2 * * *"),
                         lookup(Map.of())))
                 .isInstanceOf(SystemConfigValidator.ConstraintViolationException.class);
+    }
+
+    // ---- search-semantic T3: semantic.top_k / semantic.min_score ----------------------------
+
+    @Test
+    void semanticTopKMustBeBetween1And200() {
+        for (long ok : new long[] {1, 50, 200}) {
+            assertThatCode(() -> SystemConfigValidator.validate(
+                            SystemConfigDefaults.SEMANTIC_TOP_K, SystemConfigValue.of(ValueType.NUMBER, ok), lookup(Map.of())))
+                    .doesNotThrowAnyException();
+        }
+        for (long bad : new long[] {0, -1, 201}) {
+            assertThatThrownBy(() -> SystemConfigValidator.validate(
+                            SystemConfigDefaults.SEMANTIC_TOP_K, SystemConfigValue.of(ValueType.NUMBER, bad), lookup(Map.of())))
+                    .isInstanceOf(SystemConfigValidator.ConstraintViolationException.class);
+        }
+    }
+
+    @Test
+    void semanticMinScoreMustBeADecimalBetween0And1() {
+        for (String ok : new String[] {"0", "0.50", "0.5", "1", "1.0"}) {
+            assertThatCode(() -> SystemConfigValidator.validate(
+                            SystemConfigDefaults.SEMANTIC_MIN_SCORE, SystemConfigValue.of(ValueType.STRING, ok), lookup(Map.of())))
+                    .as(ok).doesNotThrowAnyException();
+        }
+        for (String bad : new String[] {"-0.1", "1.01", "abc", "", "NaN"}) {
+            assertThatThrownBy(() -> SystemConfigValidator.validate(
+                            SystemConfigDefaults.SEMANTIC_MIN_SCORE, SystemConfigValue.of(ValueType.STRING, bad), lookup(Map.of())))
+                    .as(bad).isInstanceOf(SystemConfigValidator.ConstraintViolationException.class);
+        }
+    }
+
+    @Test
+    void semanticDefaultsMatchTheSpec() {
+        assertThat(SystemConfigDefaults.get(SystemConfigDefaults.SEMANTIC_TOP_K).defaultValue()).isEqualTo("50");
+        assertThat(SystemConfigDefaults.get(SystemConfigDefaults.SEMANTIC_MIN_SCORE).defaultValue()).isEqualTo("0.50");
+        assertThat(SystemConfigDefaults.get(SystemConfigDefaults.SEMANTIC_MIN_SCORE).sensitive()).isFalse();
     }
 }

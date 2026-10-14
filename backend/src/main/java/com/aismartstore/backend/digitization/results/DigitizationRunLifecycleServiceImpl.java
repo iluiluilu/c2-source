@@ -281,7 +281,7 @@ public class DigitizationRunLifecycleServiceImpl implements DigitizationRunLifec
             UUID segmentId, int expectedRevisionNo, String newText, Integer newTimeStartMs, Integer newTimeEndMs,
             String editedBy, String reason) {
         ContentSegment segment = contentSegmentRepository.findById(segmentId)
-                .orElseThrow(() -> new IllegalArgumentException("content_segment not found: " + segmentId));
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đoạn nội dung: " + segmentId));
         requireExpectedRevision(segment, expectedRevisionNo);
         String oldText = segment.getCurrentText();
         OffsetDateTime now = OffsetDateTime.now();
@@ -342,7 +342,7 @@ public class DigitizationRunLifecycleServiceImpl implements DigitizationRunLifec
     @Override
     public ContentSegment deleteSegment(UUID segmentId, int expectedRevisionNo, String editedBy, String reason) {
         ContentSegment segment = contentSegmentRepository.findById(segmentId)
-                .orElseThrow(() -> new IllegalArgumentException("content_segment not found: " + segmentId));
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đoạn nội dung: " + segmentId));
         requireExpectedRevision(segment, expectedRevisionNo);
         OffsetDateTime now = OffsetDateTime.now();
         int newRevisionNo = segment.getCurrentRevisionNo() + 1;
@@ -475,7 +475,8 @@ public class DigitizationRunLifecycleServiceImpl implements DigitizationRunLifec
         if (!DigitizationRun.REVIEW_PENDING.equals(run.getReviewState())
                 && !DigitizationRun.REVIEW_IN_REVIEW.equals(run.getReviewState())) {
             throw new ConflictException(
-                    "digitization_run " + runId + " cannot be confirmed from review_state=" + run.getReviewState());
+                    "Lượt số hoá " + runId + " không thể xác nhận ở trạng thái kiểm duyệt hiện tại ("
+                            + run.getReviewState() + ")");
         }
 
         OffsetDateTime now = OffsetDateTime.now();
@@ -564,7 +565,7 @@ public class DigitizationRunLifecycleServiceImpl implements DigitizationRunLifec
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
                 ContentSegment latest = contentSegmentRepository.findById(segmentId)
-                        .orElseThrow(() -> new IllegalArgumentException("content_segment not found: " + segmentId));
+                        .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đoạn nội dung: " + segmentId));
                 throw new SegmentRevisionConflictException(latest, expectedRevisionNo);
             }
             throw e;
@@ -906,7 +907,7 @@ public class DigitizationRunLifecycleServiceImpl implements DigitizationRunLifec
 
     private DigitizationRun getRunOrThrow(UUID runId) {
         return digitizationRunRepository.findById(runId)
-                .orElseThrow(() -> new IllegalArgumentException("digitization_run not found: " + runId));
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy lượt số hoá: " + runId));
     }
 
     private static boolean isTerminalProcessingStatus(String status) {

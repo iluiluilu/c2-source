@@ -15,6 +15,9 @@ import com.aismartstore.backend.common.ConflictException;
 import com.aismartstore.backend.common.NotFoundException;
 import com.aismartstore.backend.documents.DocumentRepository;
 import com.aismartstore.backend.documents.DocumentStatus;
+import com.aismartstore.backend.outbox.OutboxEvent;
+import com.aismartstore.backend.outbox.OutboxEventRepository;
+import org.mockito.ArgumentCaptor;
 import com.aismartstore.backend.warehouse.dto.CreateFolderDto;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -34,6 +37,7 @@ class WarehouseFolderServiceTest {
 
     private WarehouseFolderRepository repository;
     private DocumentRepository documentRepository;
+    private OutboxEventRepository outboxEventRepository;
     private WarehouseService service;
 
     private final KeycloakUser admin = new KeycloakUser("admin-sub", "admin", List.of("quan-tri"));
@@ -42,7 +46,8 @@ class WarehouseFolderServiceTest {
     void setUp() {
         repository = mock(WarehouseFolderRepository.class);
         documentRepository = mock(DocumentRepository.class);
-        service = new WarehouseService(repository, documentRepository);
+        outboxEventRepository = mock(OutboxEventRepository.class);
+        service = new WarehouseService(repository, documentRepository, outboxEventRepository);
     }
 
     private static WarehouseFolder folder(UUID id, UUID parentId, UUID[] pathIds, int depth) {
@@ -245,6 +250,26 @@ class WarehouseFolderServiceTest {
 
         // moveFolder never touches Document rows - folder_id stays whatever it already was.
         verify(documentRepository, never()).existsByFolderIdAndStatusAndDeletedAtIsNull(any(), any());
+
+        // search-semantic T10 (Q-10): exactly one folder.moved outbox event, payload = folderId only (no paths).
+        ArgumentCaptor<OutboxEvent> eventCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxEventRepository).save(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getEventType()).isEqualTo("folder.moved");
+        assertThat(eventCaptor.getValue().getPayload())
+                .containsEntry("folderId", folderId.toString())
+                .containsEntry("movedBySub", "admin-sub")
+                .containsKeys("movedAt")
+                .doesNotContainKeys("pathIds", "oldPath", "newPath");
+    }
+
+    @Test
+    void rejectedMoveWritesNoFolderMovedEvent() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.of(folder(id, null, new UUID[0], 1)));
+
+        assertThatThrownBy(() -> service.moveFolder(admin, id, id)).isInstanceOf(ApiException.class);
+
+        verify(outboxEventRepository, never()).save(any());
     }
 
     @Test

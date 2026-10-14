@@ -133,17 +133,17 @@ public class PersonalToWarehouseService {
         List<UUID> fileIds = dto.fileIdsOrEmpty();
         List<UUID> folderIds = dto.folderIdsOrEmpty();
         if (fileIds.isEmpty() && folderIds.isEmpty()) {
-            throw new BadRequestException("fileIds or folderIds must not be empty");
+            throw new BadRequestException("Chưa chọn tệp hoặc thư mục nào");
         }
 
         // AC-6: only an already existing warehouse folder is a valid target.
         if (!warehouseService.folderExists(dto.targetFolderId())) {
-            throw new NotFoundException("Folder not found");
+            throw new NotFoundException("Không tìm thấy thư mục");
         }
 
         List<Collected> collected = collect(user, fileIds, folderIds);
         if (collected.isEmpty()) {
-            throw new BadRequestException("No files found in the selection");
+            throw new BadRequestException("Không có tệp nào trong lựa chọn");
         }
 
         // Server-side filter (AC-8): not counted against the batch limits.
@@ -269,10 +269,10 @@ public class PersonalToWarehouseService {
         List<UUID> fileIds = dto.fileIdsOrEmpty();
         List<UUID> folderIds = dto.folderIdsOrEmpty();
         if (fileIds.isEmpty() && folderIds.isEmpty()) {
-            throw new BadRequestException("fileIds or folderIds must not be empty");
+            throw new BadRequestException("Chưa chọn tệp hoặc thư mục nào");
         }
         if (!warehouseService.folderExists(dto.targetFolderId())) {
-            throw new NotFoundException("Folder not found");
+            throw new NotFoundException("Không tìm thấy thư mục");
         }
         List<Collected> collected = collect(user, fileIds, folderIds);
         if (collected.size() > NameCheckRequest.MAX_FILES) {
@@ -500,14 +500,14 @@ public class PersonalToWarehouseService {
     // ---------------------------------------------------------------- errors
 
     private static NotFoundException selectionNotFound() {
-        return new NotFoundException("Personal file or folder not found");
+        return new NotFoundException("Không tìm thấy tệp hoặc thư mục cá nhân");
     }
 
     private static ApiException batchNotFound() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", "BATCH_NOT_FOUND");
         body.put("message", "Không tìm thấy lượt bổ sung");
-        return new ApiException(HttpStatus.NOT_FOUND, body, "Batch not found");
+        return new ApiException(HttpStatus.NOT_FOUND, body, "Không tìm thấy lượt tải");
     }
 
     /** 400 per the story (the older /ingest flow answers 409 - deliberately not reused). */

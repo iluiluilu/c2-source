@@ -1,0 +1,165 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "1s",
+    "analysis": {
+      "filter": {
+        "vi_stop": {
+          "type": "stop",
+          "stopwords_path": "analysis/vi_stopwords.txt"
+        },
+        "shingle_2_3": {
+          "type": "shingle",
+          "min_shingle_size": 2,
+          "max_shingle_size": 3,
+          "output_unigrams": false
+        }
+      },
+      "analyzer": {
+        "vi_text": {
+          "type": "custom",
+          "char_filter": [],
+          "tokenizer": "icu_tokenizer",
+          "filter": [
+            "icu_normalizer",
+            "vi_stop"
+          ]
+        },
+        "vi_text_folded": {
+          "type": "custom",
+          "tokenizer": "icu_tokenizer",
+          "filter": [
+            "icu_normalizer",
+            "icu_folding",
+            "vi_stop"
+          ]
+        },
+        "vi_text_shingle": {
+          "type": "custom",
+          "tokenizer": "icu_tokenizer",
+          "filter": [
+            "icu_normalizer",
+            "vi_stop",
+            "shingle_2_3"
+          ]
+        }
+      }
+    },
+    "index": {
+      "knn": true,
+      "knn.algo_param.ef_search": 100
+    }
+  },
+  "mappings": {
+    "properties": {
+      "segment_id": {
+        "type": "keyword"
+      },
+      "document_id": {
+        "type": "keyword"
+      },
+      "segment_index": {
+        "type": "integer"
+      },
+      "text": {
+        "type": "text",
+        "analyzer": "vi_text",
+        "index_options": "offsets",
+        "fields": {
+          "folded": {
+            "type": "text",
+            "analyzer": "vi_text_folded",
+            "index_options": "offsets"
+          },
+          "shingle": {
+            "type": "text",
+            "analyzer": "vi_text_shingle"
+          }
+        }
+      },
+      "content_source": {
+        "type": "keyword"
+      },
+      "confirm_source": {
+        "type": "keyword"
+      },
+      "run_id": {
+        "type": "keyword"
+      },
+      "position_type": {
+        "type": "keyword"
+      },
+      "page_no": {
+        "type": "integer"
+      },
+      "line_from": {
+        "type": "integer"
+      },
+      "line_to": {
+        "type": "integer"
+      },
+      "time_start_ms": {
+        "type": "integer"
+      },
+      "time_end_ms": {
+        "type": "integer"
+      },
+      "doc_type": {
+        "type": "keyword"
+      },
+      "topic_tags": {
+        "type": "keyword"
+      },
+      "folder_id": {
+        "type": "keyword"
+      },
+      "folder_path_ids": {
+        "type": "keyword"
+      },
+      "uploaded_at": {
+        "type": "date"
+      },
+      "media_type": {
+        "type": "keyword"
+      },
+      "owner_user_id": {
+        "type": "keyword"
+      },
+      "scope_group_ids": {
+        "type": "keyword"
+      },
+      "acl_version": {
+        "type": "integer"
+      },
+      "index_version": {
+        "type": "long"
+      },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1024,
+        "space_type": "innerproduct",
+        "method": {
+          "name": "hnsw",
+          "engine": "faiss",
+          "parameters": {
+            "m": 16,
+            "ef_construction": 128,
+            "encoder": {
+              "name": "sq",
+              "parameters": {
+                "type": "fp16"
+              }
+            }
+          }
+        }
+      },
+      "model_version": {
+        "type": "keyword"
+      },
+      "embed_text_hash": {
+        "type": "keyword"
+      }
+    }
+  }
+}

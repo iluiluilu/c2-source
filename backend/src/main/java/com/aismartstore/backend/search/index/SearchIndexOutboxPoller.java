@@ -8,6 +8,10 @@ import com.aismartstore.backend.notes.DocumentNote;
 import com.aismartstore.backend.notes.DocumentNoteRepository;
 import com.aismartstore.backend.outbox.OutboxEvent;
 import com.aismartstore.backend.outbox.OutboxEventRepository;
+import com.aismartstore.backend.config.EmbeddingProperties;
+import com.aismartstore.backend.config.SemanticProperties;
+import com.aismartstore.backend.warehouse.WarehouseFolder;
+import com.aismartstore.backend.warehouse.WarehouseFolderRepository;
 import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -57,6 +61,12 @@ public class SearchIndexOutboxPoller {
     static final String EVENT_DOCUMENT_RESTORED = "document.restored";
     /** trash-search-index-cleanup.md §4.1 - {@code TrashPurgeService}, 1 document id per event. */
     static final String EVENT_DOCUMENT_PURGED = "document.purged";
+    /**
+     * SPEC-search-semantic T10 (Q-3/Q-10): {@code WarehouseService#moveFolder}. Payload carries only
+     * {@code folderId} (+ {@code movedAt}, {@code movedBySub}) - the new path is always re-read from
+     * PostgreSQL, never trusted from the payload.
+     */
+    static final String EVENT_FOLDER_MOVED = "folder.moved";
 
     /** Package-private: {@code SearchIndexReconciliationJob} scopes its parked-row alert (§4.4.4)
      * to exactly the event types this poller is responsible for. */
@@ -69,7 +79,8 @@ public class SearchIndexOutboxPoller {
             EVENT_ACL_CHANGED,
             EVENT_DOCUMENT_TRASHED,
             EVENT_DOCUMENT_RESTORED,
-            EVENT_DOCUMENT_PURGED);
+            EVENT_DOCUMENT_PURGED,
+            EVENT_FOLDER_MOVED);
 
     /** §4.2 intro - one polling tick claims at most this many rows (one at a time, one transaction each). */
     private static final int BATCH_LIMIT = 200;
@@ -101,6 +112,25 @@ public class SearchIndexOutboxPoller {
      */
     private final int maxAttempts;
 
+    /**
+     * SPEC-search-semantic collaborators - setter-injected (optional) so the pre-existing
+     * constructor contract of this class is unchanged. {@code embedPublisher == null} or {@code
+     * semanticProperties.enabled() == false} means "no embed.requested" (flag off).
+     */
+    private EmbedRequestPublisher embedPublisher;
+    private SemanticProperties semanticProperties;
+    private WarehouseFolderRepository warehouseFolderRepository;
+
+    @Autowired(required = false)
+    void setSemanticCollaborators(
+            EmbedRequestPublisher embedPublisher,
+            SemanticProperties semanticProperties,
+            WarehouseFolderRepository warehouseFolderRepository) {
+        this.embedPublisher = embedPublisher;
+        this.semanticProperties = semanticProperties;
+        this.warehouseFolderRepository = warehouseFolderRepository;
+    }
+
     /** Self-proxy so {@link #claimAndProcessOne()}'s {@code @Transactional} is honoured (same idiom as {@code GroupsService.self}). */
     private SearchIndexOutboxPoller self;
 
@@ -129,8 +159,47 @@ public class SearchIndexOutboxPoller {
         this.self = self;
     }
 
+    /** backend-multi-instance Task 12: null in unit tests that build the poller by hand = no cross-instance lock. */
+    private SearchIndexPollerLock pollerLock;
+
+    /** backend-multi-instance Task 14: null = no hash annotation (unit tests that build the poller by hand). */
+    private EmbeddingProperties embeddingProperties;
+
+    @Autowired(required = false)
+    void setEmbeddingProperties(EmbeddingProperties embeddingProperties) {
+        this.embeddingProperties = embeddingProperties;
+    }
+
+    /** Adds {@code embed_text_hash} (same function + config as the embed consumer) to the lexical sources. */
+    private void annotateEmbedHash(List<Map<String, Object>> sources) {
+        if (embeddingProperties != null) {
+            EmbedTextHash.annotate(
+                    sources, embeddingProperties.chunkSizeTokens(), embeddingProperties.chunkOverlapTokens());
+        }
+    }
+
+    @Autowired(required = false)
+    void setPollerLock(SearchIndexPollerLock pollerLock) {
+        this.pollerLock = pollerLock;
+    }
+
     @Scheduled(fixedDelayString = "${app.search-index.poll-interval-ms:2000}")
     public void poll() {
+        if (pollerLock == null) {
+            pollLoop();
+            return;
+        }
+        Optional<SearchIndexPollerLock.Handle> lock = pollerLock.tryAcquire();
+        if (lock.isEmpty()) {
+            log.debug("search index poller: another instance holds the poll lock, skipping tick");
+            return;
+        }
+        try (SearchIndexPollerLock.Handle ignored = lock.get()) {
+            pollLoop();
+        }
+    }
+
+    private void pollLoop() {
         for (int i = 0; i < BATCH_LIMIT; i++) {
             boolean claimed = self.claimAndProcessOne();
             if (!claimed) {
@@ -212,6 +281,7 @@ public class SearchIndexOutboxPoller {
             case EVENT_DOCUMENT_TRASHED -> handleDocumentTrashed(payload);
             case EVENT_DOCUMENT_RESTORED -> handleDocumentRestored(payload);
             case EVENT_DOCUMENT_PURGED -> handleDocumentPurged(payload);
+            case EVENT_FOLDER_MOVED -> handleFolderMoved(payload);
             default -> log.warn("SearchIndexOutboxPoller: unhandled event_type '{}' (claim query bug?)", eventType);
         }
     }
@@ -248,7 +318,10 @@ public class SearchIndexOutboxPoller {
         if (fields.isEmpty()) {
             return;
         }
-        indexNoteSegmentIfAny(documentId, fields.get(), fields.get().contentVersion());
+        if (indexNoteSegmentIfAny(documentId, fields.get(), fields.get().contentVersion())) {
+            publishEmbed(documentId, List.of(notesSegmentId(documentId)), EmbedRequestMessage.REASON_NOTE,
+                    fields.get().contentVersion());
+        }
     }
 
     /**
@@ -258,11 +331,11 @@ public class SearchIndexOutboxPoller {
      * (oldest first) into the single {@code content_source='note'} segment,
      * or leaves the index untouched if the document has no note.
      */
-    private void indexNoteSegmentIfAny(UUID documentId, DocumentIndexFieldsBuilder.Fields f, long externalVersion)
+    private boolean indexNoteSegmentIfAny(UUID documentId, DocumentIndexFieldsBuilder.Fields f, long externalVersion)
             throws IOException {
         List<DocumentNote> notes = new ArrayList<>(documentNoteRepository.findByDocumentIdOrderByCreatedAtDesc(documentId));
         if (notes.isEmpty()) {
-            return; // no note left to reflect (no delete path exists today, but stay defensive).
+            return false; // no note left to reflect (no delete path exists today, but stay defensive).
         }
         java.util.Collections.reverse(notes); // oldest first - a natural reading order for the merged text.
         String mergedText = notes.stream().map(DocumentNote::getBody).reduce((a, b) -> a + "\n\n" + b).orElse("");
@@ -275,7 +348,10 @@ public class SearchIndexOutboxPoller {
         source.put("run_id", null);
         source.put("position_type", "none");
 
-        segmentIndexer.upsertSegments(List.of(source), externalVersion);
+        List<Map<String, Object>> noteSources = List.of(source);
+        annotateEmbedHash(noteSources);
+        segmentIndexer.upsertSegments(noteSources, externalVersion);
+        return true;
     }
 
     /** §4.2 bước 3 - AC-2: upsert `document` + a `content_source='title'` segment right away, before any digitization result exists. */
@@ -286,6 +362,8 @@ public class SearchIndexOutboxPoller {
             return;
         }
         indexDocumentAndTitleSegment(documentId, fields.get(), fields.get().contentVersion());
+        publishEmbed(documentId, List.of(titleSegmentId(documentId)), EmbedRequestMessage.REASON_INGESTED,
+                fields.get().contentVersion());
     }
 
     /**
@@ -306,7 +384,9 @@ public class SearchIndexOutboxPoller {
         titleSegment.put("confirm_source", null);
         titleSegment.put("run_id", null);
         titleSegment.put("position_type", "none");
-        segmentIndexer.upsertSegments(List.of(titleSegment), externalVersion);
+        List<Map<String, Object>> titleSources = List.of(titleSegment);
+        annotateEmbedHash(titleSources);
+        segmentIndexer.upsertSegments(titleSources, externalVersion);
     }
 
     /**
@@ -330,10 +410,20 @@ public class SearchIndexOutboxPoller {
         long externalVersion = f.contentVersion();
 
         List<ContentSegment> segments = contentSegmentRepository.findByRunIdOrderBySegmentIndex(runId);
-        segmentIndexer.upsertSegments(confirmedSegmentSources(segments, f, externalVersion), externalVersion);
+        String runConfirmSource = digitizationRunRepository.findById(runId)
+                .map(DigitizationRun::getConfirmSource)
+                .orElse(null);
+        List<Map<String, Object>> confirmedSources =
+                confirmedSegmentSources(segments, runConfirmSource, f, externalVersion);
+        annotateEmbedHash(confirmedSources);
+        segmentIndexer.upsertSegments(confirmedSources, externalVersion);
 
         Map<String, Object> documentSource = documentFields(f, externalVersion);
         documentIndexer.upsertDocument(documentSource, externalVersion);
+
+        // R4: the lexical upsert above OVERWRITES each document, dropping its vector - always ask for the
+        // same segments to be embedded again (and only those; `sed` etc. are filtered out).
+        publishEmbed(documentId, embeddableIds(confirmedSources), EmbedRequestMessage.REASON_CONFIRMED, externalVersion);
 
         digitizationRunRepository
                 .findByDocumentIdAndTaskAndReviewState(documentId, task, DigitizationRun.REVIEW_SUPERSEDED)
@@ -402,6 +492,8 @@ public class SearchIndexOutboxPoller {
         indexDocumentAndTitleSegment(documentId, f, externalVersion);
         indexConfirmedSegmentsForAllTasks(documentId, f, externalVersion);
         indexNoteSegmentIfAny(documentId, f, externalVersion);
+        // The whole footprint was rebuilt from scratch (no vectors) - embed the whole document again.
+        publishEmbed(documentId, null, EmbedRequestMessage.REASON_RESTORED, externalVersion);
     }
 
     /**
@@ -436,8 +528,9 @@ public class SearchIndexOutboxPoller {
         List<Map<String, Object>> sources = new ArrayList<>();
         for (DigitizationRun run : confirmedRuns) {
             List<ContentSegment> segments = contentSegmentRepository.findByRunIdOrderBySegmentIndex(run.getId());
-            sources.addAll(confirmedSegmentSources(segments, f, externalVersion));
+            sources.addAll(confirmedSegmentSources(segments, run.getConfirmSource(), f, externalVersion));
         }
+        annotateEmbedHash(sources);
         segmentIndexer.upsertSegments(sources, externalVersion);
     }
 
@@ -447,13 +540,16 @@ public class SearchIndexOutboxPoller {
      * and {@link #indexConfirmedSegmentsForAllTasks} (every confirmed run).
      */
     private static List<Map<String, Object>> confirmedSegmentSources(
-            List<ContentSegment> segments, DocumentIndexFieldsBuilder.Fields f, long externalVersion) {
+            List<ContentSegment> segments,
+            String runConfirmSource,
+            DocumentIndexFieldsBuilder.Fields f,
+            long externalVersion) {
         List<Map<String, Object>> sources = new ArrayList<>();
         for (ContentSegment segment : segments) {
             if (segment.isDeleted()) {
                 continue;
             }
-            sources.add(contentSegmentFields(segment, f, externalVersion));
+            sources.add(contentSegmentFields(segment, runConfirmSource, f, externalVersion));
         }
         return sources;
     }
@@ -463,6 +559,82 @@ public class SearchIndexOutboxPoller {
         @SuppressWarnings("unchecked")
         List<String> ids = (List<String>) payload.get("documentIds");
         return ids.stream().map(UUID::fromString).toList();
+    }
+
+    // ---- search-semantic: embed.requested + folder.moved -------------------------------------
+
+    private boolean semanticEnabled() {
+        return embedPublisher != null && semanticProperties != null && semanticProperties.enabled();
+    }
+
+    /**
+     * SPEC-search-semantic T7 (indexing §4.1): asks for the given segments to be embedded, only after
+     * the lexical write of this very event succeeded. A publish failure throws, so the outbox row is
+     * retried (idempotent). {@code segmentIds == null} = the whole document. Nothing is published for
+     * an empty id list or when the semantic flag is off.
+     */
+    private void publishEmbed(UUID documentId, List<String> segmentIds, String reason, long version) {
+        if (!semanticEnabled()) {
+            return;
+        }
+        if (segmentIds != null && segmentIds.isEmpty()) {
+            return;
+        }
+        embedPublisher.publish(documentId, segmentIds, reason, version);
+    }
+
+    /** Ids of the freshly upserted sources that are eligible for embedding (no `sed`, no blank text). */
+    private static List<String> embeddableIds(List<Map<String, Object>> sources) {
+        List<String> ids = new ArrayList<>();
+        for (Map<String, Object> source : sources) {
+            Object text = source.get("text");
+            if (EmbedTextBuilder.isEmbeddable(String.valueOf(source.get("content_source")))
+                    && text != null
+                    && !String.valueOf(text).isBlank()) {
+                ids.add(String.valueOf(source.get("segment_id")));
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * SPEC-search-semantic T10 (Q-3, Q-10): recomputes {@code folder_path_ids} for the moved folder and
+     * every folder in its subtree from PostgreSQL, then partial-updates the {@code segment} and {@code
+     * document} index entries filed directly in each of those folders (selected by their {@code
+     * folder_id}). The update is unconditional and idempotent (always the current Postgres state), keeps
+     * the vector, is throttled (requests_per_second) and independent of the semantic flag.
+     */
+    private void handleFolderMoved(Map<String, Object> payload) throws IOException {
+        if (warehouseFolderRepository == null) {
+            throw new IllegalStateException("folder.moved cannot be handled: WarehouseFolderRepository is not wired");
+        }
+        UUID folderId = UUID.fromString(String.valueOf(payload.get("folderId")));
+        Optional<WarehouseFolder> moved = warehouseFolderRepository.findById(folderId);
+        if (moved.isEmpty()) {
+            return; // folder deleted since the event was written - nothing to reflect.
+        }
+        List<WarehouseFolder> subtree = new ArrayList<>();
+        subtree.add(moved.get());
+        subtree.addAll(warehouseFolderRepository.findDescendants(folderId));
+
+        int rps = semanticProperties != null && semanticProperties.folderMoveThrottleRps() > 0
+                ? semanticProperties.folderMoveThrottleRps()
+                : CLASSIFICATION_UPDATE_THROTTLE_RPS;
+        String script = "ctx._source.folder_path_ids = params.folderPathIds;";
+        for (WarehouseFolder folder : subtree) {
+            List<String> folderPathIds = new ArrayList<>();
+            for (UUID ancestorId : folder.getPathIds()) {
+                folderPathIds.add(ancestorId.toString());
+            }
+            folderPathIds.add(folder.getId().toString());
+
+            Map<String, JsonData> params = Map.of("folderPathIds", JsonData.of(folderPathIds));
+            org.opensearch.client.opensearch._types.query_dsl.Query filter =
+                    org.opensearch.client.opensearch._types.query_dsl.Query.of(q -> q.term(t -> t.field("folder_id")
+                            .value(org.opensearch.client.opensearch._types.FieldValue.of(folder.getId().toString()))));
+            segmentIndexer.updateByQuery(filter, script, params, rps);
+            documentIndexer.updateByQuery(filter, script, params);
+        }
     }
 
     // ---- shared field builders -------------------------------------------------------------
@@ -492,14 +664,18 @@ public class SearchIndexOutboxPoller {
     }
 
     private static Map<String, Object> contentSegmentFields(
-            ContentSegment segment, DocumentIndexFieldsBuilder.Fields f, long externalVersion) {
+            ContentSegment segment,
+            String runConfirmSource,
+            DocumentIndexFieldsBuilder.Fields f,
+            long externalVersion) {
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("segment_id", segment.getId().toString());
         source.put("document_id", f.documentId().toString());
         source.put("segment_index", segment.getSegmentIndex());
         source.put("text", segment.getCurrentText());
         source.put("content_source", segment.getContentSource());
-        source.put("confirm_source", normalizeConfirmSource(segment));
+        // §2.1: the confirm_source of record is the run's (who confirmed it and how), never a per-segment guess.
+        source.put("confirm_source", DigitizationRun.searchConfirmSource(runConfirmSource));
         source.put("run_id", segment.getRunId().toString());
 
         boolean timeBased = ContentSegment.SOURCE_STT.equals(segment.getContentSource())
@@ -530,17 +706,6 @@ public class SearchIndexOutboxPoller {
         }
         putCommonFields(source, f, externalVersion);
         return source;
-    }
-
-    /**
-     * search-fulltext-01-tim-kiem-co-ban.md §2.1 note - the DB's 3-value
-     * {@code confirm_source} (`auto`/`manual_unchanged`/`manual_edited`)
-     * normalizes to OpenSearch's 2-value contract (`auto`/`manual`).
-     */
-    private static String normalizeConfirmSource(ContentSegment segment) {
-        // The confirm_source of record lives on digitization_run (per-run, not per-segment) -
-        // `is_edited` on the segment itself is this indexer's best per-segment proxy for it.
-        return segment.isEdited() ? "manual" : "auto";
     }
 
     /**

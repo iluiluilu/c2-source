@@ -28,6 +28,7 @@ services:
       S3_BUCKET: documents
       S3_PERSONAL_BUCKET: personal
       S3_AUDIT_ARCHIVE_BUCKET: audit-archive
+      S3_REPORTS_BUCKET: reports
       S3_REGION: us-east-1
       CLAMD_HOST: clamav
       CLAMD_PORT: "3310"

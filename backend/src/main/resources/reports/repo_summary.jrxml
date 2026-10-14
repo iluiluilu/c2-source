@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Report template REPO_SUMMARY (Tổng hợp tình hình kho tài liệu theo kỳ).
+Minimal layout (AC-25): page header = template code + name + period/filters; page footer = prepared-by, timestamp, scope notice, page number.
+No agency name / signature block / document number. The body is a list of sections (TEXT | TABLE | CHART_BAR | CHART_STACKED) built by
+ReportRenderService from the ReportResult DTO; table/chart sections are sub-reports fed by JRBeanCollectionDataSource.
+There is NO <queryString> anywhere (AC-36; enforced by JrxmlGuardTest and by the precompiler).
+The detail band is splitType="Prevent": a section (table title + its table) moves to the next page as a whole instead of
+leaving the title orphaned at the bottom of a page; a section taller than a page still splits.
+-->
+<jasperReport name="repo_summary" language="java" pageWidth="842" pageHeight="595" orientation="Landscape" whenNoDataType="AllSectionsNoDetail" columnWidth="780" leftMargin="31" rightMargin="31" topMargin="28" bottomMargin="28" uuid="412ea5e9-7d53-497e-bbde-738521daa7d5">
+	<style name="sans" fontName="AISS Sans" fontSize="9.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" pdfEmbedded="true"/>
+	<style name="serif" fontName="Liberation Serif" fontSize="13.0" pdfFontName="Liberation Serif" pdfEncoding="Identity-H" pdfEmbedded="true"/>
+	<parameter name="REPORT_CODE" class="java.lang.String"/>
+	<parameter name="REPORT_NAME" class="java.lang.String"/>
+	<parameter name="HEADER_LINE" class="java.lang.String"/>
+	<parameter name="FOOTER_LINE" class="java.lang.String"/>
+	<parameter name="SUBREPORT_TABLE" class="net.sf.jasperreports.engine.JasperReport"/>
+	<parameter name="SUBREPORT_CHART_BAR" class="net.sf.jasperreports.engine.JasperReport"/>
+	<parameter name="SUBREPORT_CHART_STACKED" class="net.sf.jasperreports.engine.JasperReport"/>
+	<field name="kind" class="java.lang.String"/>
+	<field name="title" class="java.lang.String"/>
+	<field name="text" class="java.lang.String"/>
+	<field name="ds" class="net.sf.jasperreports.engine.JRDataSource"/>
+	<pageHeader height="62">
+		<element kind="textField" uuid="cc4364ac-0ea0-4419-bf14-e802288bf905" x="0" y="0" width="780" height="18" bold="true" vTextAlign="Middle" style="serif">
+			<expression><![CDATA[$P{REPORT_CODE} + " - " + $P{REPORT_NAME}]]></expression>
+		</element>
+		<element kind="textField" uuid="d31f21fe-69a3-46e3-a57c-e340d1706bb5" x="0" y="20" width="780" height="40" vTextAlign="Top" style="sans">
+			<expression><![CDATA[$P{HEADER_LINE}]]></expression>
+		</element>
+		<element kind="line" uuid="7ca8e50a-28fe-4322-987c-b5587c2472a8" x="0" y="60" width="780" height="1">
+			<pen lineWidth="0.5"/>
+		</element>
+	</pageHeader>
+	<detail>
+		<band height="40" splitType="Prevent">
+			<element kind="textField" uuid="a7793193-e805-489b-8e8a-b524b380d84e" x="0" y="0" width="780" height="16" positionType="Float" fontSize="10.0" textAdjust="StretchHeight" bold="true" blankWhenNull="true" vTextAlign="Middle" style="sans">
+				<printWhenExpression><![CDATA["TABLE".equals($F{kind})]]></printWhenExpression>
+				<expression><![CDATA[$F{title}]]></expression>
+			</element>
+			<element kind="textField" uuid="221835c1-c32b-4f2d-b3a0-87a45f023dee" x="0" y="0" width="780" height="16" positionType="Float" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" vTextAlign="Top" style="sans">
+				<printWhenExpression><![CDATA["TEXT".equals($F{kind})]]></printWhenExpression>
+				<expression><![CDATA[$F{text}]]></expression>
+			</element>
+			<element kind="subreport" uuid="b952ed54-ccaa-4317-8b1f-5b82a7435f2d" x="0" y="18" width="780" height="16" positionType="Float" usingCache="false">
+				<printWhenExpression><![CDATA["TABLE".equals($F{kind})]]></printWhenExpression>
+				<dataSourceExpression><![CDATA[$F{ds}]]></dataSourceExpression>
+				<expression><![CDATA[$P{SUBREPORT_TABLE}]]></expression>
+			</element>
+			<element kind="subreport" uuid="2186125b-f882-4bc7-8161-d9cfaa62676a" x="0" y="0" width="780" height="16" positionType="Float" usingCache="false">
+				<printWhenExpression><![CDATA["CHART_BAR".equals($F{kind})]]></printWhenExpression>
+				<parameter name="CHART_TITLE">
+					<expression><![CDATA[$F{title}]]></expression>
+				</parameter>
+				<dataSourceExpression><![CDATA[$F{ds}]]></dataSourceExpression>
+				<expression><![CDATA[$P{SUBREPORT_CHART_BAR}]]></expression>
+			</element>
+			<element kind="subreport" uuid="7ee2e08c-4f75-4872-b327-16081b18c99b" x="0" y="0" width="780" height="16" positionType="Float" usingCache="false">
+				<printWhenExpression><![CDATA["CHART_STACKED".equals($F{kind})]]></printWhenExpression>
+				<parameter name="CHART_TITLE">
+					<expression><![CDATA[$F{title}]]></expression>
+				</parameter>
+				<dataSourceExpression><![CDATA[$F{ds}]]></dataSourceExpression>
+				<expression><![CDATA[$P{SUBREPORT_CHART_STACKED}]]></expression>
+			</element>
+			<element kind="staticText" uuid="92b6c9b2-887e-4ea5-acea-7f3e5a1318d3" x="0" y="36" width="780" height="4" positionType="Float">
+				<text><![CDATA[ ]]></text>
+			</element>
+		</band>
+	</detail>
+	<pageFooter height="34">
+		<element kind="line" uuid="be1df42b-c958-441b-843d-cd34e3dcac20" x="0" y="0" width="780" height="1">
+			<pen lineWidth="0.5"/>
+		</element>
+		<element kind="textField" uuid="2a181d7a-7797-4618-b6cc-140da9d4e5ce" x="0" y="3" width="690" height="28" vTextAlign="Top" style="sans">
+			<expression><![CDATA[$P{FOOTER_LINE}]]></expression>
+		</element>
+		<element kind="textField" uuid="cb50fb2e-dbdc-485c-9801-341fbe927590" x="690" y="3" width="90" height="14" hTextAlign="Right" vTextAlign="Top" style="sans">
+			<expression><![CDATA["Trang " + $V{PAGE_NUMBER}]]></expression>
+		</element>
+	</pageFooter>
+</jasperReport>

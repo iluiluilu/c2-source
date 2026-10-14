@@ -18,6 +18,15 @@ public final class DocumentSpecifications {
     }
 
     /**
+     * {@code status = 'clean'}: rejected/infected rows are FR-12 evidence only (no stored bytes) and must never
+     * surface in search (feedbacks S-01) - {@link com.aismartstore.backend.groups.BusinessDataScope} filters
+     * visibility, not status, because the warehouse list deliberately still shows those rows.
+     */
+    public static Specification<Document> isClean() {
+        return (root, query, cb) -> cb.equal(root.get("status"), DocumentStatus.CLEAN);
+    }
+
+    /**
      * {@code GET /documents?q=} (group-detail "Thêm tài liệu" picker): case
      * and diacritics-sensitive {@code ILIKE '%q%'} on {@code originalName} -
      * same simple substring match as {@code UserDirectoryService}'s {@code

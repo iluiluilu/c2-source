@@ -1,5 +1,6 @@
 package com.aismartstore.backend.digitization;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.config.QueueProperties;
 import java.util.Properties;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ public class DigitizationDlqAlertJob {
     }
 
     @Scheduled(fixedDelayString = "${app.digitization.dlq-alert-interval-ms:300000}")
+    @SchedulerLock(name = "digitization-dlq-alert", lockAtMostFor = "PT15M", lockAtLeastFor = "PT4M55S")
     public void run() {
         checkDlq(queueProperties.ocrName() + ".dlq");
         checkDlq(queueProperties.sttName() + ".dlq");

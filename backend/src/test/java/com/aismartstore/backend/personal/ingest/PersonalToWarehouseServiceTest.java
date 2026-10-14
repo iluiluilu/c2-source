@@ -168,7 +168,7 @@ class PersonalToWarehouseServiceTest {
                 .isInstanceOf(NotFoundException.class);
         assertThatThrownBy(() -> service.collect(USER, List.of(), List.of(UUID.randomUUID())))
                 .isInstanceOf(NotFoundException.class)
-                .hasMessage("Personal file or folder not found");
+                .hasMessage("Không tìm thấy tệp hoặc thư mục cá nhân");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.aismartstore.backend.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * Binds {@code app.queue.*} (digitization-pipeline-01-source-dispatch.md
@@ -9,7 +10,20 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * per digitization-pipeline.md Quyet dinh 2.
  */
 @ConfigurationProperties(prefix = "app.queue")
-public record QueueProperties(String ocrName, String sttName, String videoName) {
+public record QueueProperties(String ocrName, String sttName, String videoName, String embedName) {
+
+    /** search-semantic T1: {@code app.queue.embed-name} (default {@code q.embed}). */
+    @ConstructorBinding
+    public QueueProperties {
+        if (embedName == null || embedName.isBlank()) {
+            embedName = "q.embed";
+        }
+    }
+
+    /** Pre-search-semantic shape - embed queue defaults to {@code q.embed}. */
+    public QueueProperties(String ocrName, String sttName, String videoName) {
+        this(ocrName, sttName, videoName, "q.embed");
+    }
 
     /**
      * digitization-pipeline-02-ocr-stt-processing.md §4.4/§4.5, extended by

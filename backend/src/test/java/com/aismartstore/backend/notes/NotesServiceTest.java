@@ -94,7 +94,7 @@ class NotesServiceTest {
     void createForDocumentThrowsNotFoundWhenOutOfScope() {
         doThrow(new NotFoundException("Document not found"))
                 .when(documentScopeGuard)
-                .requireVisible(user, documentId);
+                .requireVisibleClean(user, documentId);
 
         assertThatThrownBy(() -> notesService.createForDocument(user, documentId, "nội dung"))
                 .isInstanceOf(NotFoundException.class);
@@ -107,7 +107,7 @@ class NotesServiceTest {
     void createForDocumentSucceedsWhenInScope() {
         DocumentNote created = notesService.createForDocument(user, documentId, "nội dung");
 
-        verify(documentScopeGuard).requireVisible(user, documentId);
+        verify(documentScopeGuard).requireVisibleClean(user, documentId);
         assertThat(created.getBody()).isEqualTo("nội dung");
         assertThat(created.getCreatedBySub()).isEqualTo(user.sub());
         verify(noteRepository).save(any());
@@ -118,7 +118,7 @@ class NotesServiceTest {
         UUID noteId = UUID.randomUUID();
         doThrow(new NotFoundException("Document not found"))
                 .when(documentScopeGuard)
-                .requireVisible(user, documentId);
+                .requireVisibleClean(user, documentId);
 
         assertThatThrownBy(() -> notesService.update(user, documentId, noteId, new UpdateNoteDto("mới", null)))
                 .isInstanceOf(NotFoundException.class);
@@ -134,7 +134,7 @@ class NotesServiceTest {
                 .thenReturn(Optional.of(existingNote(documentId, noteId, OffsetDateTime.now())));
         doThrow(new NotFoundException("Document not found"))
                 .when(documentScopeGuard)
-                .requireVisible(user, documentId);
+                .requireVisibleClean(user, documentId);
 
         assertThatThrownBy(() -> notesService.update(user, documentId, noteId, new UpdateNoteDto("mới", null)))
                 .isInstanceOf(NotFoundException.class);

@@ -1,5 +1,6 @@
 package com.aismartstore.backend.config;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import javax.sql.DataSource;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
@@ -12,8 +13,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * delete-restore-trash-02-xoa-cung-xung-dot.md Task 1: first ShedLock
  * consumer in this backend ({@code TrashPurgeJob}/{@code
  * PurgeStuckRecoveryJob}, §4.1/§4.3) - {@code @EnableScheduling} itself
- * already lives on {@link com.aismartstore.backend.BackendApplication}, only
- * the lock machinery is new here. Reuses the shedlock table (V30) and the
+ * lives on {@link SchedulingConfig} (conditional on the role flag), only
+ * the lock machinery is here. Reuses the shedlock table (V30) and the
  * existing Postgres {@link DataSource} - no new infra.
  *
  * <p>{@code defaultLockAtMostFor} is a safety net only: every {@code
@@ -26,11 +27,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class SchedulerLockConfig {
 
     @Bean
-    public LockProvider lockProvider(DataSource dataSource) {
-        return new JdbcTemplateLockProvider(
+    public LockProvider lockProvider(DataSource dataSource, MeterRegistry meterRegistry) {
+        LockProvider jdbc = new JdbcTemplateLockProvider(
                 JdbcTemplateLockProvider.Configuration.builder()
                         .withJdbcTemplate(new JdbcTemplate(dataSource))
                         .usingDbTime()
                         .build());
+        // backend-multi-instance Task 5: log + count skipped ticks.
+        return new LoggingLockProvider(jdbc, meterRegistry);
     }
 }

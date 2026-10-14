@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Chart sub-report (plain bar). Fields series/category/value come from a JRBeanCollectionDataSource (AC-36).
+Chart text uses the embedded AISS Sans font (Vietnamese).
+-->
+<jasperReport name="chart_bar" language="java" pageWidth="780" pageHeight="595" whenNoDataType="NoPages" columnWidth="780" leftMargin="0" rightMargin="0" topMargin="0" bottomMargin="0" uuid="29e2e7ef-73fa-496b-923a-434716a6f9d2">
+	<parameter name="CHART_TITLE" class="java.lang.String"/>
+	<field name="series" class="java.lang.String"/>
+	<field name="category" class="java.lang.String"/>
+	<field name="value" class="java.lang.Number"/>
+	<summary height="230" splitType="Prevent">
+		<element kind="chart" uuid="f39125df-ab3c-4c51-9810-5480bd367020" x="0" y="0" width="780" height="230" evaluationTime="Report" showLegend="true" customizerClass="com.aismartstore.backend.reporting.IntegerAxisChartCustomizer" chartType="bar">
+			<box>
+				<pen lineWidth="0.5" lineColor="#999999"/>
+			</box>
+			<titleExpression><![CDATA[$P{CHART_TITLE}]]></titleExpression>
+			<titleFont fontName="AISS Sans" fontSize="10.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="true" pdfEmbedded="true"/>
+			<legendFont fontName="AISS Sans" fontSize="8.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="false" pdfEmbedded="true"/>
+			<dataset kind="category">
+				<series>
+					<seriesExpression><![CDATA[$F{series}]]></seriesExpression>
+					<categoryExpression><![CDATA[$F{category}]]></categoryExpression>
+					<valueExpression><![CDATA[$F{value}]]></valueExpression>
+				</series>
+			</dataset>
+			<plot showLabels="false">
+				<categoryAxisLabelFont fontName="AISS Sans" fontSize="8.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="false" pdfEmbedded="true"/>
+				<categoryAxisTickLabelFont fontName="AISS Sans" fontSize="8.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="false" pdfEmbedded="true"/>
+				<valueAxisLabelFont fontName="AISS Sans" fontSize="8.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="false" pdfEmbedded="true"/>
+				<valueAxisTickLabelFont fontName="AISS Sans" fontSize="8.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" bold="false" pdfEmbedded="true"/>
+				<itemLabel/>
+			</plot>
+		</element>
+	</summary>
+</jasperReport>

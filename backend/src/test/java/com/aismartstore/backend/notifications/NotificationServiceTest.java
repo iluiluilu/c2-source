@@ -56,7 +56,7 @@ class NotificationServiceTest {
         when(groupMemberRepository.findByGroupIdOrderByJoinedAtAsc(groupId))
                 .thenThrow(new RuntimeException("db down"));
 
-        assertThatCode(() -> service.notifyDocumentsSharedToGroup(groupId, List.of(UUID.randomUUID()), "actor-sub"))
+        assertThatCode(() -> service.notifyDocumentsSharedToGroup(groupId, "Nhóm", List.of(UUID.randomUUID()), "actor-sub", "actor"))
                 .doesNotThrowAnyException();
     }
 
@@ -66,7 +66,7 @@ class NotificationServiceTest {
         when(groupMemberRepository.findByGroupIdOrderByJoinedAtAsc(groupId))
                 .thenReturn(List.of(member("actor-sub"), member("member-a"), member("member-b")));
 
-        service.notifyDocumentsSharedToGroup(groupId, List.of(UUID.randomUUID()), "actor-sub");
+        service.notifyDocumentsSharedToGroup(groupId, "Nhóm", List.of(UUID.randomUUID()), "actor-sub", "actor");
 
         verify(notificationRepository).saveAll(argThat((List<Notification> rows) -> rows.size() == 2));
     }
@@ -75,7 +75,7 @@ class NotificationServiceTest {
     void notifyDocumentsSharedToGroupIsANoOpWhenThereAreNoDocuments() {
         UUID groupId = UUID.randomUUID();
 
-        service.notifyDocumentsSharedToGroup(groupId, List.of(), "actor-sub");
+        service.notifyDocumentsSharedToGroup(groupId, "Nhóm", List.of(), "actor-sub", "actor");
 
         verify(groupMemberRepository, never()).findByGroupIdOrderByJoinedAtAsc(any());
     }

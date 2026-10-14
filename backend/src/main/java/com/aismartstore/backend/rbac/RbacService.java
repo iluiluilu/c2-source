@@ -73,7 +73,7 @@ public class RbacService {
     public record RoleView(String code, String displayName, List<String> permissionCodes) {
     }
 
-    public record PermissionView(String code, String description) {
+    public record PermissionView(String code, String description, boolean adminAssignable) {
     }
 
     public record PreviewImpactResult(
@@ -102,7 +102,7 @@ public class RbacService {
     /** Story 1: the closed permission catalogue (not filtered by role). */
     public List<PermissionView> listPermissions() {
         return permissionRepository.findAllByOrderByCodeAsc().stream()
-                .map(p -> new PermissionView(p.getCode(), p.getDescription()))
+                .map(p -> new PermissionView(p.getCode(), p.getDescription(), p.isAdminAssignable()))
                 .toList();
     }
 
@@ -110,6 +110,7 @@ public class RbacService {
     public PreviewImpactResult previewImpact(String roleCode, List<String> desiredPermissionCodes) {
         validateRoleCode(roleCode);
         Set<String> desired = validatePermissionCodes(desiredPermissionCodes);
+        guardAdminAssignable(roleCode, desired);
         Set<String> current = currentPermissionCodes(roleCode);
 
         List<String> added = desired.stream().filter(p -> !current.contains(p)).sorted().toList();
@@ -135,6 +136,7 @@ public class RbacService {
         Set<String> desired = validatePermissionCodes(desiredPermissionCodes);
         Set<String> current = currentPermissionCodes(roleCode);
 
+        guardAdminAssignable(roleCode, desired);
         guardLockout(roleCode, desired);
 
         List<String> added = desired.stream().filter(p -> !current.contains(p)).sorted().toList();
@@ -161,6 +163,25 @@ public class RbacService {
         return new UpdateResult(roleCode, desired.stream().sorted().toList(), countAccountsWithRole(roleCode));
     }
 
+    /**
+     * SPEC-export-reporting §3 / AC-5: permissions flagged {@code admin_assignable=false}
+     * (e.g. {@code report.*}) can never be granted to QUAN_TRI - R3 must not see business
+     * data. 400, nothing changes (checked before any write).
+     */
+    private void guardAdminAssignable(String roleCode, Set<String> desired) {
+        if (!"QUAN_TRI".equals(roleCode) || desired.isEmpty()) {
+            return;
+        }
+        List<String> blocked = permissionRepository.findAll().stream()
+                .filter(p -> !p.isAdminAssignable() && desired.contains(p.getCode()))
+                .map(PermissionEntity::getCode)
+                .sorted()
+                .toList();
+        if (!blocked.isEmpty()) {
+            throw new BadRequestException("Không thể gán quyền " + blocked + " cho vai trò QUAN_TRI");
+        }
+    }
+
     /** mục 4.4: hard-block turning QUAN_TRI into a role that can no longer administer the system. */
     private void guardLockout(String roleCode, Set<String> newPermissionCodes) {
         if (!"QUAN_TRI".equals(roleCode)) {
@@ -184,7 +205,7 @@ public class RbacService {
 
     private void validateRoleCode(String roleCode) {
         if (!ROLE_CODES.contains(roleCode)) {
-            throw new BadRequestException("Unknown role: " + roleCode);
+            throw new BadRequestException("Vai trò không hợp lệ: " + roleCode);
         }
     }
 
@@ -198,7 +219,7 @@ public class RbacService {
         Set<String> requested = new LinkedHashSet<>(permissionCodes);
         for (String code : requested) {
             if (!known.contains(code)) {
-                throw new BadRequestException("Unknown permission: " + code);
+                throw new BadRequestException("Quyền không hợp lệ: " + code);
             }
         }
         return requested;

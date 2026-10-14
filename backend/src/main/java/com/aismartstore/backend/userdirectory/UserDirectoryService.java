@@ -60,7 +60,7 @@ public class UserDirectoryService {
     public List<UserDirectoryEntry> search(KeycloakUser user, String q) {
         String keyword = q == null ? "" : q.trim();
         if (keyword.length() < 2) {
-            throw new BadRequestException("q must be at least 2 characters");
+            throw new BadRequestException("Từ khoá tìm kiếm phải có ít nhất 2 ký tự");
         }
 
         List<Map<String, Object>> candidates;

@@ -93,7 +93,7 @@ class PersonalServiceTest {
         systemConfigService = mock(SystemConfigService.class);
 
         StorageProperties storageProperties = new StorageProperties(
-                "http://localhost:8333", "us-east-1", "ak", "sk", "documents", PERSONAL_BUCKET, "audit-archive");
+                "http://localhost:8333", "us-east-1", "ak", "sk", "documents", PERSONAL_BUCKET, "audit-archive", "reports");
 
         service = new PersonalService(
                 folderRepository, fileRepository, uploadBatchRepository, clamdService, objectStorageService,

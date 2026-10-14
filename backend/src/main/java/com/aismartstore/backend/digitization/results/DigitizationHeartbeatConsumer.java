@@ -28,7 +28,7 @@ public class DigitizationHeartbeatConsumer {
         this.digitizationRunRepository = digitizationRunRepository;
     }
 
-    @RabbitListener(queues = RabbitConfig.HEARTBEAT_QUEUE)
+    @RabbitListener(queues = RabbitConfig.HEARTBEAT_QUEUE, autoStartup = "${app.messaging.consumers-enabled:true}")
     public void onHeartbeat(HeartbeatMessage message) {
         OffsetDateTime leaseExpiresAt = OffsetDateTime.now().plusSeconds(LEASE_SECONDS);
         int updated = digitizationRunRepository.heartbeat(message.runId(), message.workerId(), leaseExpiresAt);

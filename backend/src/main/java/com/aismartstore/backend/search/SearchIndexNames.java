@@ -10,7 +10,14 @@ package com.aismartstore.backend.search;
 public final class SearchIndexNames {
 
     /** Physical index backing the {@code segment} alias. */
-    public static final String SEGMENT_PHYSICAL_INDEX = "segment-v1";
+    public static final String SEGMENT_PHYSICAL_INDEX = "segment-v2";
+    /**
+     * search-semantic (SPEC-search-semantic T4): the previous physical index
+     * (no {@code embedding}/{@code model_version}, no {@code index.knn}). Only
+     * referenced to detect "alias still on v1" at bootstrap - see {@link
+     * SearchIndexBootstrap}.
+     */
+    public static final String SEGMENT_LEGACY_PHYSICAL_INDEX = "segment-v1";
     /** Alias every query/write against segments must use. */
     public static final String SEGMENT_ALIAS = "segment";
 

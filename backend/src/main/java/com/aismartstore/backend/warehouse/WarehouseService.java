@@ -7,6 +7,8 @@ import com.aismartstore.backend.common.NotFoundException;
 import com.aismartstore.backend.common.SqlErrors;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
+import com.aismartstore.backend.outbox.OutboxEvent;
+import com.aismartstore.backend.outbox.OutboxEventRepository;
 import com.aismartstore.backend.documents.DocumentStatus;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -35,10 +37,15 @@ public class WarehouseService {
 
     private final WarehouseFolderRepository repository;
     private final DocumentRepository documentRepository;
+    private final OutboxEventRepository outboxEventRepository;
 
-    public WarehouseService(WarehouseFolderRepository repository, DocumentRepository documentRepository) {
+    public WarehouseService(
+            WarehouseFolderRepository repository,
+            DocumentRepository documentRepository,
+            OutboxEventRepository outboxEventRepository) {
         this.repository = repository;
         this.documentRepository = documentRepository;
+        this.outboxEventRepository = outboxEventRepository;
     }
 
     // ------------------------------------------------------------- create/rename (Story 1)
@@ -48,7 +55,7 @@ public class WarehouseService {
         short depth;
         if (parentId != null) {
             WarehouseFolder parent =
-                    repository.findById(parentId).orElseThrow(() -> new NotFoundException("Parent folder not found"));
+                    repository.findById(parentId).orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục cha"));
             if (parent.getDepth() + 1 > MAX_DEPTH) {
                 throw maxDepthExceeded();
             }
@@ -76,7 +83,7 @@ public class WarehouseService {
             return repository.save(folder);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A folder with this name already exists at this level");
+                throw new ConflictException("Đã có thư mục cùng tên ở cấp này");
             }
             throw e;
         }
@@ -84,7 +91,7 @@ public class WarehouseService {
 
     /** Renames only: {@code path_ids}/{@code depth}/{@code parent_id} of this or any other row are untouched (AC-5). */
     public WarehouseFolder renameFolder(KeycloakUser user, UUID id, String name) {
-        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Folder not found"));
+        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục"));
         folder.setName(name);
         folder.setUpdatedAt(OffsetDateTime.now());
         folder.setUpdatedBySub(user.sub());
@@ -94,7 +101,7 @@ public class WarehouseService {
             return repository.save(folder);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A folder with this name already exists at this level");
+                throw new ConflictException("Đã có thư mục cùng tên ở cấp này");
             }
             throw e;
         }
@@ -110,13 +117,13 @@ public class WarehouseService {
      */
     @Transactional
     public WarehouseFolder moveFolder(KeycloakUser user, UUID id, UUID newParentId) {
-        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Folder not found"));
+        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục"));
 
         WarehouseFolder newParent = null;
         if (newParentId != null) {
             newParent = repository
                     .findById(newParentId)
-                    .orElseThrow(() -> new NotFoundException("Target parent folder not found"));
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục cha đích"));
         }
 
         if (newParentId != null
@@ -151,7 +158,7 @@ public class WarehouseService {
             repository.save(folder);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A folder with this name already exists at this level");
+                throw new ConflictException("Đã có thư mục cùng tên ở cấp này");
             }
             throw e;
         }
@@ -174,7 +181,26 @@ public class WarehouseService {
             repository.saveAll(descendants);
         }
 
+        writeFolderMovedOutboxEvent(folder.getId(), now, user.sub());
         return folder;
+    }
+
+    /**
+     * SPEC-search-semantic T10 (Q-3, Q-10): same transaction as the {@code path_ids} update above, so
+     * the search index can never be told about a move that was rolled back (nor miss one that
+     * committed). The payload deliberately carries only the folder id: {@code SearchIndexOutboxPoller}
+     * recomputes {@code folder_path_ids} for the whole subtree from PostgreSQL.
+     */
+    private void writeFolderMovedOutboxEvent(UUID folderId, OffsetDateTime movedAt, String movedBySub) {
+        OutboxEvent event = new OutboxEvent();
+        event.setEventType("folder.moved");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("folderId", folderId.toString());
+        payload.put("movedAt", movedAt.toString());
+        payload.put("movedBySub", movedBySub);
+        event.setPayload(payload);
+        event.setCreatedAt(movedAt);
+        outboxEventRepository.save(event);
     }
 
     // ------------------------------------------------------------- delete (Story 3)
@@ -187,7 +213,7 @@ public class WarehouseService {
      */
     @Transactional
     public void deleteFolder(UUID id) {
-        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Folder not found"));
+        WarehouseFolder folder = repository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy thư mục"));
         if (repository.existsByParentId(id)) {
             throw folderNotEmpty("hasChildFolders");
         }
@@ -200,7 +226,7 @@ public class WarehouseService {
         try {
             repository.deleteById(id);
         } catch (EmptyResultDataAccessException e) {
-            throw new NotFoundException("Folder not found");
+            throw new NotFoundException("Không tìm thấy thư mục");
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isForeignKeyViolation(e)) {
                 throw folderNotEmpty("hasChildFolders");

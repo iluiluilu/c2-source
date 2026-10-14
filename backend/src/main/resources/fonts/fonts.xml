@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fonts embedded into generated reports (AC-26). "AISS Sans" = DejaVu Sans (broad Vietnamese coverage),
+     "Liberation Serif" = Times-metric serif used for the report title. Both support the Vietnamese alphabet. -->
+<fontFamilies>
+  <fontFamily name="AISS Sans">
+    <normal><![CDATA[fonts/DejaVuSans.ttf]]></normal>
+    <bold><![CDATA[fonts/DejaVuSans-Bold.ttf]]></bold>
+    <italic><![CDATA[fonts/DejaVuSans-Oblique.ttf]]></italic>
+    <boldItalic><![CDATA[fonts/DejaVuSans-BoldOblique.ttf]]></boldItalic>
+    <pdfEncoding><![CDATA[Identity-H]]></pdfEncoding>
+    <pdfEmbedded><![CDATA[true]]></pdfEmbedded>
+    <exportFonts/>
+  </fontFamily>
+  <fontFamily name="Liberation Serif">
+    <normal><![CDATA[fonts/LiberationSerif-Regular.ttf]]></normal>
+    <bold><![CDATA[fonts/LiberationSerif-Bold.ttf]]></bold>
+    <italic><![CDATA[fonts/LiberationSerif-Italic.ttf]]></italic>
+    <boldItalic><![CDATA[fonts/LiberationSerif-BoldItalic.ttf]]></boldItalic>
+    <pdfEncoding><![CDATA[Identity-H]]></pdfEncoding>
+    <pdfEmbedded><![CDATA[true]]></pdfEmbedded>
+    <exportFonts/>
+  </fontFamily>
+</fontFamilies>

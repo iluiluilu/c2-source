@@ -63,6 +63,7 @@ public class ObjectStorageService {
         ensureBucket(properties.bucket());
         ensureBucket(properties.personalBucket());
         ensureBucket(properties.auditArchiveBucket());
+        ensureBucket(properties.reportsBucket());
     }
 
     private void ensureBucket(String bucket) {

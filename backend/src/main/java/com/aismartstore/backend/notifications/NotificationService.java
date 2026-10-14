@@ -1,5 +1,6 @@
 package com.aismartstore.backend.notifications;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.auth.KeycloakUser;
 import com.aismartstore.backend.common.NotFoundException;
 import com.aismartstore.backend.groups.GroupMember;
@@ -65,7 +66,7 @@ public class NotificationService {
     @Transactional
     public void markRead(KeycloakUser user, UUID id) {
         if (!notificationRepository.existsByIdAndRecipientSub(id, user.sub())) {
-            throw new NotFoundException("Notification not found");
+            throw new NotFoundException("Không tìm thấy thông báo");
         }
         notificationRepository.markRead(id, user.sub(), OffsetDateTime.now());
     }
@@ -88,13 +89,15 @@ public class NotificationService {
     /**
      * §4.1 step 3/§4.4 point 3 (Story 1 AC-Story 4 AC-3): exactly one {@code
      * document.shared_to_group} notification per recipient per bulk-share
-     * request, regardless of how many documents were shared in it.
+     * request, regardless of how many documents were shared in it (the
+     * single-document share endpoint calls it with one id).
      * Recipients are every current member of {@code groupId} except {@code
      * actorSub}, resolved here (not by the caller) so {@code GroupsService}
      * never has to know how notification fan-out works.
      */
     @Async
-    public void notifyDocumentsSharedToGroup(UUID groupId, List<UUID> documentIds, String actorSub) {
+    public void notifyDocumentsSharedToGroup(
+            UUID groupId, String groupName, List<UUID> documentIds, String actorSub, String actorUsername) {
         try {
             if (documentIds.isEmpty()) {
                 return;
@@ -109,8 +112,10 @@ public class NotificationService {
             }
             Map<String, Object> payload = Map.of(
                     "groupId", groupId.toString(),
+                    "groupName", groupName,
                     "documentIds", documentIds.stream().map(UUID::toString).toList(),
-                    "sharedBySub", actorSub);
+                    "sharedBySub", actorSub,
+                    "actorUsername", actorUsername);
             insertBatch(recipients, "document.shared_to_group", payload);
         } catch (RuntimeException e) {
             log.error("Failed to write document.shared_to_group notifications for group={}", groupId, e);
@@ -134,6 +139,7 @@ public class NotificationService {
 
     /** §4.5 step 3: daily TTL cleanup - rows older than {@value #RETENTION_DAYS} days. */
     @Scheduled(fixedDelayString = "${app.notifications.retention-interval-ms:86400000}")
+    @SchedulerLock(name = "notification-retention", lockAtMostFor = "PT24H", lockAtLeastFor = "PT1M")
     public void cleanupExpired() {
         OffsetDateTime cutoff = OffsetDateTime.now().minusDays(RETENTION_DAYS);
         int deleted = notificationRepository.deleteByCreatedAtBefore(cutoff);

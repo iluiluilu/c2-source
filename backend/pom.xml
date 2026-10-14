@@ -35,6 +35,7 @@
       changes and is deliberately not taken here.
     -->
     <testcontainers.version>1.21.4</testcontainers.version>
+    <jasperreports.version>7.0.8</jasperreports.version>
   </properties>
 
   <dependencies>
@@ -180,6 +181,38 @@
       <version>3.0.8</version>
     </dependency>
 
+    <!--
+      export-reporting T11 (SPEC-export-reporting §4, Part T §4, R-1): JasperReports 7.0.x -
+      render báo cáo ra PDF/XLSX/DOCX từ JRBeanCollectionDataSource. Cùng MỘT version cho mọi module.
+      Chỉ nạp module cần dùng (core, PDF/OpenPDF, excel-poi, fonts DejaVu, charts/JFreeChart).
+      jasperreports-jdt (compiler) chỉ cần lúc build -> scope runtime KHÔNG cần; khai ở exec plugin bên dưới.
+    -->
+    <dependency>
+      <groupId>net.sf.jasperreports</groupId>
+      <artifactId>jasperreports</artifactId>
+      <version>${jasperreports.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.sf.jasperreports</groupId>
+      <artifactId>jasperreports-pdf</artifactId>
+      <version>${jasperreports.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.sf.jasperreports</groupId>
+      <artifactId>jasperreports-excel-poi</artifactId>
+      <version>${jasperreports.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.sf.jasperreports</groupId>
+      <artifactId>jasperreports-fonts</artifactId>
+      <version>${jasperreports.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.sf.jasperreports</groupId>
+      <artifactId>jasperreports-charts</artifactId>
+      <version>${jasperreports.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
@@ -196,6 +229,11 @@
       release line already compatible with Spring 6.1/Boot 3.3 (jakarta
       namespace).
     -->
+    <!-- backend-multi-instance Task 16a: health probes (port 3002) + Micrometer MeterRegistry. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
     <dependency>
       <groupId>net.javacrumbs.shedlock</groupId>
       <artifactId>shedlock-spring</artifactId>
@@ -263,6 +301,43 @@
             </exclude>
           </excludes>
         </configuration>
+      </plugin>
+      <!--
+        export-reporting T11 (SPEC Part T §4, review #3): precompile src/main/resources/reports/*.jrxml
+        to target/classes/reports/*.jasper. The legacy Jasper Maven plugins do not support
+        JasperReports 7, so a tiny main class (JasperPrecompiler) calls JasperCompileManager from
+        exec:java in phase process-classes (after compile, before test). jasperreports-jdt is only a
+        PLUGIN dependency (build-time expression compiler); the runtime loads the compiled .jasper.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <dependencies>
+          <dependency>
+            <groupId>net.sf.jasperreports</groupId>
+            <artifactId>jasperreports-jdt</artifactId>
+            <version>${jasperreports.version}</version>
+          </dependency>
+        </dependencies>
+        <executions>
+          <execution>
+            <id>precompile-jasper-reports</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>com.aismartstore.backend.reporting.build.JasperPrecompiler</mainClass>
+              <includePluginDependencies>true</includePluginDependencies>
+              <classpathScope>compile</classpathScope>
+              <arguments>
+                <argument>${project.basedir}/src/main/resources/reports</argument>
+                <argument>${project.build.outputDirectory}/reports</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <!--
         Before this, *IT.java classes (Testcontainers-based) had no standard

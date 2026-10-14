@@ -25,6 +25,17 @@ import org.opensearch.client.opensearch.core.SearchRequest;
  */
 class SearchQueryBuilderTest {
 
+    @Test
+    void lexicalOnlyQueryExcludesSedSegments() {
+        SearchRequest request = SearchQueryBuilder.buildLexicalSearchOnlyQuery(
+                "hop dong", null, new ScopeContext("u", List.of()), List.of(), 50);
+        BoolQuery bool = request.query().bool();
+        assertThat(bool.mustNot()).hasSize(1);
+        TermQuery term = bool.mustNot().get(0).term();
+        assertThat(term.field()).isEqualTo("content_source");
+        assertThat(term.value().stringValue()).isEqualTo("sed");
+    }
+
     private static final ScopeContext CTX = new ScopeContext("user-1", List.of("group-a"));
 
     // ---- AC-7-AC-11: simple_query_string flags/fields, and AC-11's "no syntax error" guarantee ----

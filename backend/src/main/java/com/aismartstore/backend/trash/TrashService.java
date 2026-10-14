@@ -115,7 +115,9 @@ public class TrashService {
             String deletedBySub,
             String deletedByUsername,
             String uploaderSub,
-            String uploaderUsername) {
+            String uploaderUsername,
+            // Folder the document was deleted from, so the list can say where a restore lands.
+            UUID folderId) {
     }
 
     public record TrashList(List<TrashItem> items, long total) {
@@ -318,7 +320,7 @@ public class TrashService {
     public TrashDetail getOne(KeycloakUser user, UUID id) {
         Document document = documentRepository
                 .findByIdAndDeletedAtIsNotNull(id)
-                .orElseThrow(() -> new NotFoundException("Trash item not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy mục trong thùng rác"));
         requireRestorePermission(user, document);
 
         long activeGroupShareCount = documentGroupShareRepository.countActiveSharesForDocument(id);
@@ -358,7 +360,7 @@ public class TrashService {
     public RestoreResult restore(KeycloakUser user, UUID id, UUID targetFolderId, String onNameConflict) {
         Document document = documentRepository
                 .findByIdAndDeletedAtIsNotNull(id)
-                .orElseThrow(() -> new NotFoundException("Trash item not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy mục trong thùng rác"));
         requireRestorePermission(user, document);
 
         if (PurgeState.PURGING.equals(document.getPurgeState())) {
@@ -515,7 +517,7 @@ public class TrashService {
         boolean isDeleter = user.sub().equals(document.getDeletedBySub());
         boolean isUploader = user.sub().equals(document.getUploaderSub());
         if (!isDeleter && !isUploader) {
-            throw new ForbiddenException("Not allowed to view/restore this trash item");
+            throw new ForbiddenException("Bạn không có quyền xem/phục hồi mục này trong thùng rác");
         }
     }
 
@@ -582,7 +584,8 @@ public class TrashService {
                 d.getDeletedBySub(),
                 d.getDeletedByUsername(),
                 d.getUploaderSub(),
-                d.getUploaderUsername());
+                d.getUploaderUsername(),
+                d.getFolderId());
     }
 
     @SuppressWarnings("unchecked")

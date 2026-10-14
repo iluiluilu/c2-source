@@ -104,4 +104,6 @@ curl -s "http://${AUTH_DOMAIN}/realms/${KEYCLOAK_REALM}/.well-known/openid-confi
 1. Sửa domain trong `stg/.env`.
 2. Build lại **image `web`** (bước 1) — bắt buộc, vì domain đã bake cứng.
 3. `backend` không cần build lại, chỉ cần `docker compose up -d` lại trên
-   server để đọc `.env` mới (xem README.md mục 4).
+   server để đọc `.env` mới (xem README.md mục 4). Từ khi backend chạy nhiều
+   instance, lệnh deploy là `docker compose up -d backend backend-worker web`
+   (cùng một image `API_IMAGE` cho cả `backend` và `backend-worker`).

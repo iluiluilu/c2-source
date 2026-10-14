@@ -59,6 +59,16 @@ class DocumentIndexFieldsBuilderTest {
     }
 
     @Test
+    void returnsEmptyWhenTheDocumentIsNotClean() {
+        UUID documentId = UUID.randomUUID();
+        Document document = document(documentId);
+        document.setStatus("rejected");
+        when(documentRepository.findById(documentId)).thenReturn(Optional.of(document));
+
+        assertThat(builder.build(documentId)).isEmpty();
+    }
+
+    @Test
     void buildsDocTypeTopicTagsFolderPathAndScopeGroupIds() {
         UUID documentId = UUID.randomUUID();
         UUID folderId = UUID.randomUUID();

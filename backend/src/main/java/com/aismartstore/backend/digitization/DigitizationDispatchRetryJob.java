@@ -1,5 +1,6 @@
 package com.aismartstore.backend.digitization;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.config.DigitizationProperties;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
@@ -50,6 +51,7 @@ public class DigitizationDispatchRetryJob {
     }
 
     @Scheduled(fixedDelayString = "${app.digitization.dispatch-retry-interval-ms:60000}")
+    @SchedulerLock(name = "digitization-dispatch-retry", lockAtMostFor = "PT5M", lockAtLeastFor = "PT55S")
     public void run() {
         int retried = retryPendingDispatch();
         int rescued = rescueMissedDocuments();

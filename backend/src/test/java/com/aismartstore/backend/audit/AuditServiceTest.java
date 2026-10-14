@@ -85,6 +85,24 @@ class AuditServiceTest {
         verifyNoInteractions(jdbcTemplate);
     }
 
+    // ---- metadata chứa kiểu ngày (bộ lọc ngày nạp của tìm kiếm) vẫn ghi được, dạng chuỗi ISO ----
+
+    @Test
+    void metadataWithJavaTimeValuesIsWrittenAsIsoStrings() {
+        Map<String, Object> filters = new java.util.LinkedHashMap<>();
+        filters.put("uploadedFrom", java.time.LocalDate.of(2026, 10, 13));
+        filters.put("uploadedTo", java.time.OffsetDateTime.parse("2026-10-13T23:59:59Z"));
+
+        auditService.recordAsync(new AuditService.AuditEntry(
+                "user-1", "sub-1", "search.executed", "search", null, "success",
+                "POST", "/search", 200, "127.0.0.1", Map.of("filters", filters, "resultCount", 2)));
+
+        AuditLog saved = captureSavedRow();
+        assertThat(saved.getMetadata().get("filters"))
+                .isEqualTo(Map.of("uploadedFrom", "2026-10-13", "uploadedTo", "2026-10-13T23:59:59Z"));
+        assertThat(hasErrorLogContaining("Failed to write audit log entry")).isFalse();
+    }
+
     // ---- eventType đã khai báo, metadata đúng allowlist -> không đổi, không log ERROR ----
 
     @Test

@@ -111,7 +111,7 @@ class TagsServiceTest {
 
         tagsService.assign(user, documentId, tagId, null);
 
-        verify(documentScopeGuard).requireVisible(user, documentId);
+        verify(documentScopeGuard).requireVisibleClean(user, documentId);
         verify(documentTagRepository).insert(documentId, tagId, TagKinds.TOPIC, user.sub(), user.preferredUsername());
         verify(outboxEventRepository).save(any());
         verify(documentTagRepository, never()).deleteByDocumentIdAndTagKind(any(), any());
@@ -184,7 +184,7 @@ class TagsServiceTest {
     void assigningOutOfScopeIsRejectedByTheGuardWith404() {
         org.mockito.Mockito.doThrow(new NotFoundException("Document not found"))
                 .when(documentScopeGuard)
-                .requireVisible(user, documentId);
+                .requireVisibleClean(user, documentId);
 
         assertThatThrownBy(() -> tagsService.assign(user, documentId, UUID.randomUUID(), null))
                 .isInstanceOf(NotFoundException.class);

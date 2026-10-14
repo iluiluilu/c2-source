@@ -1,5 +1,10 @@
 package com.aismartstore.backend.upload;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import java.io.IOException;
+import java.nio.file.FileStore;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -24,13 +29,19 @@ public class UploadCleanupJob {
     private static final Logger log = LoggerFactory.getLogger(UploadCleanupJob.class);
     private static final int BATCH_SIZE = 500;
 
-    private final UploadSessionService uploadSessionService;
+    /** backend-multi-instance Task 11 (AC-15): warn when the shared upload-tmp volume passes this fill ratio. */
+    static final double USAGE_WARN_RATIO = 0.80;
 
-    public UploadCleanupJob(UploadSessionService uploadSessionService) {
+    private final UploadSessionService uploadSessionService;
+    private final UploadProperties uploadProperties;
+
+    public UploadCleanupJob(UploadSessionService uploadSessionService, UploadProperties uploadProperties) {
         this.uploadSessionService = uploadSessionService;
+        this.uploadProperties = uploadProperties;
     }
 
     @Scheduled(fixedDelayString = "${app.upload.session-cleanup-interval-ms:900000}")
+    @SchedulerLock(name = "upload-cleanup", lockAtMostFor = "PT45M", lockAtLeastFor = "PT30S")
     public void run() {
         long startedAt = System.currentTimeMillis();
         List<UUID> candidateIds = uploadSessionService.findExpiredSessionIds(BATCH_SIZE);
@@ -67,5 +78,28 @@ public class UploadCleanupJob {
                 filesMissing,
                 fileErrors,
                 System.currentTimeMillis() - startedAt);
+        checkTempDirUsage();
+    }
+
+    /** Package-visible for tests. Logs WARN with the fixed key {@code upload-tmp usage=} when over threshold. */
+    void checkTempDirUsage() {
+        try {
+            Path dir = uploadProperties.resolvedTempDir();
+            if (!Files.isDirectory(dir)) {
+                return;
+            }
+            FileStore store = Files.getFileStore(dir);
+            long total = store.getTotalSpace();
+            if (total <= 0) {
+                return;
+            }
+            double ratio = 1.0 - (double) store.getUsableSpace() / total;
+            if (ratio > USAGE_WARN_RATIO) {
+                log.warn("upload-tmp usage={}% dir={} (threshold {}%)",
+                        Math.round(ratio * 100), dir, Math.round(USAGE_WARN_RATIO * 100));
+            }
+        } catch (IOException | RuntimeException e) {
+            log.warn("upload-tmp usage check failed: {}", e.toString());
+        }
     }
 }

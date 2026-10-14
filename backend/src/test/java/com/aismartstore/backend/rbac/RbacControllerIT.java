@@ -162,7 +162,8 @@ class RbacControllerIT {
 
         mockMvc.perform(get("/admin/rbac/permissions").with(admin()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(21));
+                // 21 + report.read/report.export (export-reporting V36)
+                .andExpect(jsonPath("$.length()").value(23));
     }
 
     // ---- Story 2 ----------------------------------------------------------

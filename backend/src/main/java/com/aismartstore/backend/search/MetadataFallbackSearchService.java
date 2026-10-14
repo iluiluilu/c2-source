@@ -75,7 +75,8 @@ public class MetadataFallbackSearchService {
     public SearchResponse search(
             SearchFilters filters, ScopeContext ctx, List<String> effectiveGroupIds, int page, int size) {
         Specification<Document> spec =
-                Specification.where(BusinessDataScope.forDocuments(ctx.userSub(), groupMemberRepository));
+                Specification.where(BusinessDataScope.forDocuments(ctx.userSub(), groupMemberRepository))
+                        .and(DocumentSpecifications.isClean());
 
         if (filters != null) {
             spec = applyDocType(spec, filters.docType());
@@ -111,7 +112,8 @@ public class MetadataFallbackSearchService {
         // batch lookup finds no document_digitization_status row.
         List<SearchHit> hits = documents.stream()
                 .map(d -> new SearchHit(
-                        d.getId(), d.getOriginalName(), docTypeLabelByDocumentId.get(d.getId()), 0.0, List.of(), null))
+                        d.getId(), d.getOriginalName(), docTypeLabelByDocumentId.get(d.getId()), 0.0, List.of(), null,
+                        d.getFolderId(), d.getUploaderUsername(), d.getCreatedAt()))
                 .toList();
 
         return new SearchResponse(

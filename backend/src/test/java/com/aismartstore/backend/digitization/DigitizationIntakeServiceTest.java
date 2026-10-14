@@ -38,7 +38,7 @@ class DigitizationIntakeServiceTest {
 
     private static final StorageProperties STORAGE =
             new StorageProperties(
-                    "http://localhost:8333", "us-east-1", "key", "secret", "documents", "personal", "audit-archive");
+                    "http://localhost:8333", "us-east-1", "key", "secret", "documents", "personal", "audit-archive", "reports");
 
     @BeforeEach
     void setUp() {

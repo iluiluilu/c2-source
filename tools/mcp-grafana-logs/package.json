@@ -1,0 +1,13 @@
+{
+  "name": "mcp-grafana-logs",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

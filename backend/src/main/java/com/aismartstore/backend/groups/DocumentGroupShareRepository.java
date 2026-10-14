@@ -32,6 +32,24 @@ public interface DocumentGroupShareRepository extends JpaRepository<DocumentGrou
     /** §4.1 step 2: how many groups a document is currently shared to, for the 50-groups/document cap (bulk share only). */
     long countByDocumentId(UUID documentId);
 
+    /**
+     * Names of the caller's (non-deleted) groups each document is shared
+     * into - the Kho list's "Chia sẻ qua <nhóm>" hint. Rows of {documentId, groupName}.
+     */
+    @Query("select s.documentId, g.name from DocumentGroupShare s, Group g "
+            + "where s.documentId in :documentIds and s.groupId in :groupIds "
+            + "and s.groupId = g.id and g.deletedAt is null order by g.name")
+    List<Object[]> findSharedGroupNames(
+            @Param("documentIds") List<UUID> documentIds, @Param("groupIds") List<UUID> groupIds);
+
+    /**
+     * Shared, not soft-deleted documents per group for the group list (same
+     * filter as findGroupDocuments): rows of {groupId, count}.
+     */
+    @Query("select s.groupId, count(s) from DocumentGroupShare s, Document d "
+            + "where s.groupId in :groupIds and s.documentId = d.id and d.deletedAt is null group by s.groupId")
+    List<Object[]> countVisibleDocumentsByGroupIds(@Param("groupIds") List<UUID> groupIds);
+
     @Modifying
     int deleteByDocumentIdAndGroupId(UUID documentId, UUID groupId);
 

@@ -1,5 +1,6 @@
 package com.aismartstore.backend.search;
 
+import com.aismartstore.backend.digitization.results.ContentSegment;
 import com.aismartstore.backend.search.dto.SearchFilters;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -159,7 +160,10 @@ public final class SearchQueryBuilder {
     public static SearchRequest buildLexicalSearchOnlyQuery(
             String query, SearchFilters filters, ScopeContext ctx, List<String> effectiveGroupIds, int topK) {
         List<Query> filterClauses = buildFilterClauses(filters, ctx, effectiveGroupIds, null);
-        Query scoped = Query.of(q -> q.bool(b -> b.must(simpleQueryString(query)).filter(filterClauses)));
+        Query scoped = Query.of(q -> q.bool(b -> b.must(simpleQueryString(query))
+                .filter(filterClauses)
+                // sed (sound-event) segments are never semantic passages: drop them before top-k, not only in the hydrator
+                .mustNot(term("content_source", ContentSegment.SOURCE_SED))));
 
         return new SearchRequest.Builder()
                 .index(SearchIndexNames.SEGMENT_ALIAS)
@@ -227,7 +231,7 @@ public final class SearchQueryBuilder {
      *                          not here, since it is also needed for the
      *                          audit entry.
      */
-    static List<Query> buildFilterClauses(
+    public static List<Query> buildFilterClauses(
             SearchFilters filters, ScopeContext ctx, List<String> effectiveGroupIds, FilterGroup exclude) {
         List<Query> clauses = new ArrayList<>();
         clauses.add(ScopeFilterBuilder.build(ctx));

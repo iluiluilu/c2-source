@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Generic table sub-report. The first row of the JRBeanCollectionDataSource is the header row (header=true).
+Each column has a String cell (cN) and a Number twin (nN) at the same position; a row fills exactly one of them, so they never
+overlap. Only the XLSX export fills nN, so spreadsheet cells are real numbers (SUM/sort work); PDF/DOCX keep the pre-formatted text.
+Data only from JRBeanCollectionDataSource (AC-36): there is no query. Columns beyond the table width are null and not printed.
+-->
+<jasperReport name="table" language="java" pageWidth="780" pageHeight="595" whenNoDataType="NoPages" columnWidth="780" leftMargin="0" rightMargin="0" topMargin="0" bottomMargin="0" uuid="9970c2b2-1f04-4f6f-89a2-d3f4ac17b295">
+	<style name="cell" fontName="AISS Sans" fontSize="9.0" pdfFontName="AISS Sans" pdfEncoding="Identity-H" pdfEmbedded="true">
+		<conditionalStyle mode="Opaque" backcolor="#E6ECF2" bold="true">
+			<conditionExpression><![CDATA[$F{header}.booleanValue()]]></conditionExpression>
+		</conditionalStyle>
+	</style>
+	<field name="header" class="java.lang.Boolean"/>
+	<field name="c0" class="java.lang.String"/>
+	<field name="c1" class="java.lang.String"/>
+	<field name="c2" class="java.lang.String"/>
+	<field name="c3" class="java.lang.String"/>
+	<field name="c4" class="java.lang.String"/>
+	<field name="c5" class="java.lang.String"/>
+	<field name="c6" class="java.lang.String"/>
+	<field name="c7" class="java.lang.String"/>
+	<field name="c8" class="java.lang.String"/>
+	<field name="c9" class="java.lang.String"/>
+	<field name="n0" class="java.lang.Number"/>
+	<field name="n1" class="java.lang.Number"/>
+	<field name="n2" class="java.lang.Number"/>
+	<field name="n3" class="java.lang.Number"/>
+	<field name="n4" class="java.lang.Number"/>
+	<field name="n5" class="java.lang.Number"/>
+	<field name="n6" class="java.lang.Number"/>
+	<field name="n7" class="java.lang.Number"/>
+	<field name="n8" class="java.lang.Number"/>
+	<field name="n9" class="java.lang.Number"/>
+	<detail>
+		<band height="16" splitType="Stretch">
+			<element kind="textField" uuid="854f21bb-57f6-4707-ab2d-76793c89568d" x="0" y="0" width="186" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Left" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c0} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c0}]]></expression>
+			</element>
+			<element kind="textField" uuid="4ea73405-561a-4165-a595-b09947979602" x="0" y="0" width="186" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n0} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n0}]]></expression>
+			</element>
+			<element kind="textField" uuid="2aea0955-5fc5-4726-9f7a-919cd655d696" x="186" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c1} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c1}]]></expression>
+			</element>
+			<element kind="textField" uuid="f77982f1-a613-4f9d-adda-aa89dba19bf8" x="186" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n1} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n1}]]></expression>
+			</element>
+			<element kind="textField" uuid="8bcbf64d-039d-473a-bd37-f7a08ee42e38" x="252" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c2} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c2}]]></expression>
+			</element>
+			<element kind="textField" uuid="16cda954-bcd1-478c-a0bf-3eb1167e4191" x="252" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n2} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n2}]]></expression>
+			</element>
+			<element kind="textField" uuid="db2f8d88-41df-4bbc-b0f9-6d472fddb20e" x="318" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c3} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c3}]]></expression>
+			</element>
+			<element kind="textField" uuid="9401817c-7536-4e92-8fb2-2d2aafda64b8" x="318" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n3} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n3}]]></expression>
+			</element>
+			<element kind="textField" uuid="5238be2d-595a-437d-b130-5b0131370db4" x="384" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c4} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c4}]]></expression>
+			</element>
+			<element kind="textField" uuid="8eb1d7cb-78ef-4ed5-834c-2ce64dd91e8d" x="384" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n4} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n4}]]></expression>
+			</element>
+			<element kind="textField" uuid="0dc515e8-5145-4fba-bdbc-bf29cff055d9" x="450" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c5} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c5}]]></expression>
+			</element>
+			<element kind="textField" uuid="08ee6856-0cba-48f8-a528-ec1bd6c03566" x="450" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n5} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n5}]]></expression>
+			</element>
+			<element kind="textField" uuid="7f3bdec7-b423-4d8c-98dd-d8f88e1355e0" x="516" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c6} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c6}]]></expression>
+			</element>
+			<element kind="textField" uuid="c63a982d-1d89-405f-abf5-df0bf4ab8f93" x="516" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n6} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n6}]]></expression>
+			</element>
+			<element kind="textField" uuid="febcf6b2-1736-49df-92a5-b5391c2708c9" x="582" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c7} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c7}]]></expression>
+			</element>
+			<element kind="textField" uuid="dc65a4e6-cdaa-43fc-a72d-02080a15ad35" x="582" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n7} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n7}]]></expression>
+			</element>
+			<element kind="textField" uuid="1953f340-c408-4131-9008-91f00ef81693" x="648" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c8} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c8}]]></expression>
+			</element>
+			<element kind="textField" uuid="86eae806-7b88-44a6-9c52-7acb7e97e1d3" x="648" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n8} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n8}]]></expression>
+			</element>
+			<element kind="textField" uuid="f71c228e-39e6-4163-aebb-6b3b25091df1" x="714" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{c9} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{c9}]]></expression>
+			</element>
+			<element kind="textField" uuid="16d1d3ad-6927-4dee-abf4-b41865d966e2" x="714" y="0" width="66" height="16" stretchType="ElementGroupHeight" textAdjust="StretchHeight" pattern="#,##0" blankWhenNull="true" hTextAlign="Right" vTextAlign="Middle" style="cell">
+				<printWhenExpression><![CDATA[$F{n9} != null]]></printWhenExpression>
+				<box padding="2" style="cell">
+					<pen lineWidth="0.5" lineColor="#999999"/>
+				</box>
+				<expression><![CDATA[$F{n9}]]></expression>
+			</element>
+		</band>
+	</detail>
+</jasperReport>

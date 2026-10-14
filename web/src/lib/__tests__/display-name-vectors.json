@@ -1,0 +1,47 @@
+{
+  "_comment": "Test vector chung FE/BE (R8). Ban sao: web/src/lib/__tests__/display-name-vectors.json - sua ca hai. Gia tri co the la chuoi hoac {rep, n, tail} = rep lap n lan + tail.",
+  "split": [
+    { "name": "a.txt", "base": "a", "ext": ".txt" },
+    { "name": ".env", "base": ".env", "ext": "" },
+    { "name": "a.tar.gz", "base": "a.tar", "ext": ".gz" },
+    { "name": "noext", "base": "noext", "ext": "" },
+    { "name": "a.", "base": "a.", "ext": "" },
+    { "name": "a.1234567890123456", "base": "a", "ext": ".1234567890123456" },
+    { "name": "a.12345678901234567", "base": "a.12345678901234567", "ext": "" },
+    { "name": "báo cáo.PDF", "base": "báo cáo", "ext": ".PDF" }
+  ],
+  "suffix": [
+    { "original": "a.txt", "ts": "20260930101530123", "rand": "ab12cd", "expected": "a_20260930101530123-ab12cd.txt" },
+    { "original": ".env", "ts": "20260930101530123", "rand": "ab12cd", "expected": ".env_20260930101530123-ab12cd" },
+    { "original": "noext", "ts": "20260930101530123", "rand": "ab12cd", "expected": "noext_20260930101530123-ab12cd" },
+    { "original": "a.tar.gz", "ts": "20260930101530123", "rand": "ab12cd", "expected": "a.tar_20260930101530123-ab12cd.gz" },
+    { "original": "Báo cáo.pdf", "ts": "20260930101530123", "rand": "ab12cd", "expected": "Báo cáo_20260930101530123-ab12cd.pdf" },
+    { "original": { "rep": "a", "n": 508, "tail": ".txt" }, "ts": "20260930101530123", "rand": "ab12cd",
+      "expected": { "rep": "a", "n": 483, "tail": "_20260930101530123-ab12cd.txt" } },
+    { "original": { "rep": "😀", "n": 510, "tail": ".p" }, "ts": "20260930101530123", "rand": "ab12cd",
+      "expected": { "rep": "😀", "n": 485, "tail": "_20260930101530123-ab12cd.p" } }
+  ],
+  "validate": [
+    { "original": "a.txt", "display": "a.txt", "reason": null },
+    { "original": "a.txt", "display": "a_20260930101530123-ab12cd.txt", "reason": null },
+    { "original": "a", "display": "a_20260930101530123-ab12cd", "reason": null },
+    { "original": "a.txt", "display": "", "reason": "EMPTY" },
+    { "original": "Báo.txt", "display": "Báo.txt", "reason": "NOT_NFC" },
+    { "original": "Báo.txt", "display": "Báo.txt", "reason": null },
+    { "original": "a.txt", "display": { "rep": "a", "n": 513, "tail": "" }, "reason": "TOO_LONG" },
+    { "original": "a/b.txt", "display": "a/b.txt", "reason": "FORBIDDEN_CHAR" },
+    { "original": "a\\b.txt", "display": "a\\b.txt", "reason": "FORBIDDEN_CHAR" },
+    { "original": "a\tb.txt", "display": "a\tb.txt", "reason": "FORBIDDEN_CHAR" },
+    { "original": "a‮b.txt", "display": "a‮b.txt", "reason": "FORBIDDEN_CHAR" },
+    { "original": "   ", "display": "   ", "reason": "BLANK_OR_DOT" },
+    { "original": ".", "display": ".", "reason": "BLANK_OR_DOT" },
+    { "original": "..", "display": "..", "reason": "BLANK_OR_DOT" },
+    { "original": "a.txt", "display": "b.txt", "reason": "SUFFIX_MISMATCH" },
+    { "original": "a.txt", "display": "a_20260930101530123-ab12cd.pdf", "reason": "SUFFIX_MISMATCH" },
+    { "original": "a.txt", "display": "a_20261330101530123-ab12cd.txt", "reason": "SUFFIX_MISMATCH" },
+    { "original": "a.txt", "display": "a_20260930101530123-AB12CD.txt", "reason": "SUFFIX_MISMATCH" },
+    { "original": "a.txt", "display": "x_20260930101530123-ab12cd.txt", "reason": "SUFFIX_MISMATCH" },
+    { "original": { "rep": "a", "n": 508, "tail": ".txt" }, "display": { "rep": "a", "n": 483, "tail": "_20260930101530123-ab12cd.txt" }, "reason": null },
+    { "original": { "rep": "a", "n": 508, "tail": ".txt" }, "display": { "rep": "a", "n": 400, "tail": "_20260930101530123-ab12cd.txt" }, "reason": "SUFFIX_MISMATCH" }
+  ]
+}

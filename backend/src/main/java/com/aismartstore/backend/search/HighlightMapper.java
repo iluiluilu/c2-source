@@ -120,6 +120,14 @@ public class HighlightMapper {
     }
 
     /**
+     * SPEC-search-semantic T15: the position of a segment with no highlight (FR-24 does not
+     * highlight, AC-2.3) - same {@code content_source} -> {@link PositionInfo} mapping as {@code map}.
+     */
+    public PositionInfo positionOf(ContentSegment segment) {
+        return toPosition(segment, null);
+    }
+
+    /**
      * §2/§4 step 1.3: {@code bbox_polygon} and the rest of a page/time
      * position never come from the OpenSearch hit source - only Postgres
      * {@code content_segment} is the field of record (§2.1 of {@code -01}).

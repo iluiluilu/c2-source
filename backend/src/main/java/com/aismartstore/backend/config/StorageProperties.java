@@ -11,5 +11,6 @@ public record StorageProperties(
         String s3SecretAccessKey,
         String bucket,
         String personalBucket,
-        String auditArchiveBucket) {
+        String auditArchiveBucket,
+        String reportsBucket) {
 }

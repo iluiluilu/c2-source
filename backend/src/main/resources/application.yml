@@ -1,9 +1,35 @@
 server:
   port: ${PORT:3001}
+  shutdown: graceful
+  # Behind nginx: Tomcat's RemoteIpValve takes the client IP from X-Forwarded-For
+  # when the direct peer is a private-network proxy (Tomcat's default
+  # internalProxies), so the audit log records the user's IP, not nginx's.
+  forward-headers-strategy: native
+
+# backend-multi-instance Task 16: Actuator tren port quan tri rieng (khong publish ra host/nginx), chi expose health.
+management:
+  server:
+    port: ${MANAGEMENT_PORT:3002}
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
 
 spring:
   application:
     name: backend
+  # backend-multi-instance Task 16: tat gon, doi toi da 320s cho request/consumer dang xu ly.
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:320s}
 
   # search-fulltext-04-dong-bo-chi-muc.md muc 4.4.3: Spring Boot mac dinh pool
   # size 1, tuc ca 18 job @Scheduled dung chung DUNG 1 thread - mot tick
@@ -77,6 +103,13 @@ spring:
     virtual-host: /
 
 app:
+  # backend-multi-instance: role = api | worker | all (profile sets it; default all-in-one).
+  role: all
+  # backend-multi-instance: co role, mac dinh true = all-in-one nhu truoc. Ten env map tuong minh (AC-2).
+  scheduling:
+    enabled: ${APP_SCHEDULING_ENABLED:true}
+  messaging:
+    consumers-enabled: ${APP_CONSUMERS_ENABLED:true}
   name-check:
     # folder-upload-display-name BE-6: gioi han in-memory theo (sub, endpoint), cua so 1 phut.
     rate-limit-per-minute: ${NAME_CHECK_RATE_LIMIT_PER_MINUTE:30}
@@ -109,6 +142,9 @@ app:
     bucket: ${S3_BUCKET:documents}
     personal-bucket: ${S3_PERSONAL_BUCKET:personal}
     audit-archive-bucket: ${S3_AUDIT_ARCHIVE_BUCKET:audit-archive}
+    # export-reporting T14: tệp báo cáo xuất (xoá được khi hết hạn) - bucket riêng, KHÔNG dùng
+    # bucket `documents` (WORM theo NFR-09). Key = <exportId>.<ext>, không lặp tiền tố bucket.
+    reports-bucket: ${S3_REPORTS_BUCKET:reports}
   scanning:
     clamd-host: ${CLAMD_HOST:localhost}
     clamd-port: ${CLAMD_PORT:3310}
@@ -117,6 +153,8 @@ app:
     socket-timeout-ms: ${CLAMD_SOCKET_TIMEOUT_MS:120000}
   upload:
     max-bytes: ${MAX_UPLOAD_BYTES:2147483648}
+    # backend-multi-instance Task 9: thu muc tempfile chunk (volume upload-tmp dung chung api/worker). Rong = java.io.tmpdir.
+    temp-dir: ${UPLOAD_TEMP_DIR:}
     # chunked-file-upload-03-session-cleanup.md: how often UploadCleanupJob
     # scans upload_session for OPEN rows whose expires_at is in the past.
     session-cleanup-interval-ms: ${UPLOAD_SESSION_CLEANUP_INTERVAL_MS:900000}
@@ -151,6 +189,39 @@ app:
     stt-name: ${QUEUE_STT_NAME:q.stt}
     # digitization-pipeline-03-video-queue.md mục 0 điểm 1 (Quyết định 8).
     video-name: ${QUEUE_VIDEO_NAME:q.video}
+    # search-semantic T1/T6: embed jobs (ai.jobs exchange, q.embed + .retry + .dlq).
+    embed-name: ${QUEUE_EMBED_NAME:q.embed}
+  # search-semantic T1 (SPEC-search-semantic): embedding REST endpoint (Qwen3-Embedding-0.6B,
+  # SA QĐ 6); vectors are stored in OpenSearch k-NN. dev: public domain only; stg/prod: internal URL (NFR-04).
+  embedding:
+    url: ${EMBEDDING_API_URL:}
+    batch-size: ${EMBEDDING_BATCH_SIZE:32}
+    # Q-7: timeout for embedding the user's question (interactive path) vs. background batches.
+    timeout-ms: ${EMBEDDING_TIMEOUT_MS:500}
+    batch-timeout-ms: ${EMBEDDING_BATCH_TIMEOUT_MS:30000}
+    model-name: ${EMBEDDING_MODEL_NAME:Qwen/Qwen3-Embedding-0.6B}
+    model-version: ${EMBEDDING_MODEL_VERSION:qwen3-embedding-0.6b-1024}
+    dimension: 1024
+    chunk-size-tokens: ${EMBEDDING_CHUNK_SIZE_TOKENS:512}
+    chunk-overlap-tokens: ${EMBEDDING_CHUNK_OVERLAP_TOKENS:64}
+    # Q-8: only the question is wrapped with the instruction, document text never is.
+    query-instruction-enabled: ${EMBEDDING_QUERY_INSTRUCTION_ENABLED:true}
+    query-instruction: ${EMBEDDING_QUERY_INSTRUCTION:Given a Vietnamese question, retrieve relevant passages from administrative documents}
+  semantic:
+    # Gates the endpoint (404 when off) AND the embed.requested producer/consumer/reconciliation.
+    enabled: ${SEMANTIC_ENABLED:false}
+    # backend-multi-instance: consumer q.embed chi chay o role worker.
+    consumer-enabled: ${SEMANTIC_CONSUMER_ENABLED:true}
+    query-concurrency: ${SEMANTIC_QUERY_CONCURRENCY:8}
+    # Q-3/R10: requests_per_second for the folder.moved update_by_query over a big subtree.
+    folder-move-throttle-rps: ${SEMANTIC_FOLDER_MOVE_THROTTLE_RPS:500}
+    reconciliation-interval-ms: ${SEMANTIC_RECONCILIATION_INTERVAL_MS:600000}
+    reconciliation-batch-size: ${SEMANTIC_RECONCILIATION_BATCH_SIZE:500}
+    # Consumer concurrency (Q-2: runs inside backend-api). 1 keeps per-document ordering trivially.
+    embed-consumer-concurrency: ${SEMANTIC_EMBED_CONSUMER_CONCURRENCY:1}
+    embed-max-retries: ${SEMANTIC_EMBED_MAX_RETRIES:5}
+    # backend-multi-instance Task 8: khong yeu cau lai tai lieu da publish embed.requested trong khoang nay (mac dinh 1h).
+    reconciliation-grace-ms: ${SEMANTIC_RECONCILIATION_GRACE_MS:3600000}
   # search-fulltext-01-tim-kiem-co-ban.md Task 1: OpenSearch runs in
   # docker-compose.yml (service `opensearch`); host/port (not a single URL)
   # so OpenSearchClientConfig can build an ApacheHttpClient5 transport HttpHost
@@ -168,6 +239,9 @@ app:
     password: ${OPENSEARCH_PASSWORD:}
 
 logging:
+  # backend-multi-instance Task 3: moi dong log mang role + instance (HOSTNAME = container id).
+  pattern:
+    level: "%5p role=${app.role:all} inst=${HOSTNAME:local}"
   level:
     root: INFO
     com.aismartstore.backend: INFO

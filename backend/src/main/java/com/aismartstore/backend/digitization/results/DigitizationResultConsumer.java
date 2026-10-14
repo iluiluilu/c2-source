@@ -26,7 +26,7 @@ public class DigitizationResultConsumer {
         this.digitizationRunLifecycleService = digitizationRunLifecycleService;
     }
 
-    @RabbitListener(queues = RabbitConfig.RESULT_QUEUE)
+    @RabbitListener(queues = RabbitConfig.RESULT_QUEUE, autoStartup = "${app.messaging.consumers-enabled:true}")
     public void onResult(ResultMessage message) {
         if (DigitizationRun.PROCESSING_SUCCEEDED.equals(message.status())) {
             digitizationRunLifecycleService.completeRunSuccess(message.runId(), toPayload(message));

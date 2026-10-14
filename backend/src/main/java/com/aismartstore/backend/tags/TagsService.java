@@ -92,7 +92,7 @@ public class TagsService {
             tagRepository.save(tag);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A topic with this name already exists");
+                throw new ConflictException("Đã có chủ đề cùng tên");
             }
             throw e;
         }
@@ -113,7 +113,7 @@ public class TagsService {
     /** {@code PATCH /tags/{id}} - rename a {@code topic} (US3 AC-2); existing {@code document_tag} links are untouched. */
     @Transactional
     public Tag rename(KeycloakUser user, UUID id, String label) {
-        Tag tag = tagRepository.findById(id).orElseThrow(() -> new NotFoundException("Tag not found"));
+        Tag tag = tagRepository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy nhãn"));
         if (!TagKinds.TOPIC.equals(tag.getKind())) {
             throw new BadRequestException("Chỉ có thể đổi tên nhãn 'topic'");
         }
@@ -124,7 +124,7 @@ public class TagsService {
             tagRepository.save(tag);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("A topic with this name already exists");
+                throw new ConflictException("Đã có chủ đề cùng tên");
             }
             throw e;
         }
@@ -145,7 +145,7 @@ public class TagsService {
      */
     @Transactional
     public Tag deactivate(KeycloakUser user, UUID id) {
-        Tag tag = tagRepository.findById(id).orElseThrow(() -> new NotFoundException("Tag not found"));
+        Tag tag = tagRepository.findById(id).orElseThrow(() -> new NotFoundException("Không tìm thấy nhãn"));
         if (!TagKinds.TOPIC.equals(tag.getKind())) {
             throw new BadRequestException("Chỉ có thể ngừng dùng nhãn 'topic'");
         }
@@ -177,7 +177,7 @@ public class TagsService {
      */
     @Transactional
     public void assign(KeycloakUser user, UUID documentId, UUID tagId, String label) {
-        documentScopeGuard.requireVisible(user, documentId);
+        documentScopeGuard.requireVisibleClean(user, documentId);
 
         Tag tag = resolveAssignTarget(user, tagId, label);
         if (!tag.isActive()) {
@@ -197,7 +197,7 @@ public class TagsService {
                     documentId, tag.getId(), tag.getKind(), user.sub(), user.preferredUsername());
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("Tag is already assigned to this document");
+                throw new ConflictException("Tài liệu đã được gắn nhãn này");
             }
             throw e;
         }
@@ -212,7 +212,7 @@ public class TagsService {
 
     private Tag resolveAssignTarget(KeycloakUser user, UUID tagId, String label) {
         if (tagId != null) {
-            return tagRepository.findById(tagId).orElseThrow(() -> new NotFoundException("Tag not found"));
+            return tagRepository.findById(tagId).orElseThrow(() -> new NotFoundException("Không tìm thấy nhãn"));
         }
         if (label == null || label.isBlank()) {
             throw new BadRequestException("tagId hoặc label là bắt buộc");
@@ -250,7 +250,7 @@ public class TagsService {
 
         DocumentTag link = documentTagRepository
                 .findById(new DocumentTagId(documentId, tagId))
-                .orElseThrow(() -> new NotFoundException("Tag is not assigned to this document"));
+                .orElseThrow(() -> new NotFoundException("Tài liệu chưa được gắn nhãn này"));
 
         if (TagKinds.DOC_TYPE.equals(link.getTagKind())) {
             throw new BadRequestException("doc_type là bắt buộc, không thể gỡ mà không gán nhãn thay thế");

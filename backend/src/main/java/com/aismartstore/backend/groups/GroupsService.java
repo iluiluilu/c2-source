@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -208,10 +209,52 @@ public class GroupsService {
         return groupRepository.findAllByIdInAndDeletedAtIsNull(groupIds);
     }
 
+    /** GET /groups row: the group plus what the list needs to be scannable. */
+    public record GroupListView(
+            UUID id,
+            String name,
+            String description,
+            String ownerSub,
+            OffsetDateTime createdAt,
+            OffsetDateTime updatedAt,
+            long memberCount,
+            long documentCount,
+            String myRole) {
+    }
+
+    /** {@link #listForCurrentUser} with member/document counts and the caller's role, in 3 queries. */
+    public List<GroupListView> listViewsForCurrentUser(KeycloakUser user) {
+        List<Group> groups = listForCurrentUser(user);
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> ids = groups.stream().map(Group::getId).toList();
+        Map<UUID, Long> members = toCountMap(groupMemberRepository.countMembersByGroupIds(ids));
+        Map<UUID, Long> documents = toCountMap(documentGroupShareRepository.countVisibleDocumentsByGroupIds(ids));
+        Map<UUID, String> myRoles = new java.util.HashMap<>();
+        for (GroupMember m : groupMemberRepository.findByUserSubAndGroupIdIn(user.sub(), ids)) {
+            myRoles.put(m.getGroupId(), m.getRoleInGroup());
+        }
+        return groups.stream()
+                .map(g -> new GroupListView(
+                        g.getId(), g.getName(), g.getDescription(), g.getOwnerSub(), g.getCreatedAt(), g.getUpdatedAt(),
+                        members.getOrDefault(g.getId(), 0L), documents.getOrDefault(g.getId(), 0L),
+                        myRoles.get(g.getId())))
+                .toList();
+    }
+
+    private static Map<UUID, Long> toCountMap(List<Object[]> rows) {
+        Map<UUID, Long> counts = new java.util.HashMap<>();
+        for (Object[] row : rows) {
+            counts.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return counts;
+    }
+
     public List<GroupMemberView> listMembers(KeycloakUser user, UUID groupId) {
         requireGroupExists(groupId);
         if (!groupMemberRepository.existsByGroupIdAndUserSub(groupId, user.sub())) {
-            throw new ForbiddenException("Not a member of this group");
+            throw new ForbiddenException("Bạn không phải thành viên của nhóm này");
         }
         return groupMemberRepository.findByGroupIdOrderByJoinedAtAsc(groupId).stream()
                 .map(this::toMemberView)
@@ -304,7 +347,7 @@ public class GroupsService {
 
         GroupMember membership = groupMemberRepository
                 .findByGroupIdAndUserSub(groupId, targetUserSub)
-                .orElseThrow(() -> new NotFoundException("User is not a member of this group"));
+                .orElseThrow(() -> new NotFoundException("Người dùng không phải thành viên của nhóm này"));
         membership.setRoleInGroup(dto.roleInGroup());
         groupMemberRepository.save(membership);
 
@@ -322,12 +365,12 @@ public class GroupsService {
      */
     @Transactional
     public void leaveGroup(KeycloakUser user, UUID groupId) {
-        requireActiveGroup(groupId);
+        Group group = requireActiveGroup(groupId);
         requireNotLastOwner(groupId, user.sub());
 
         int affected = groupMemberRepository.deleteByGroupIdAndUserSub(groupId, user.sub());
         if (affected == 0) {
-            throw new NotFoundException("User is not a member of this group");
+            throw new NotFoundException("Người dùng không phải thành viên của nhóm này");
         }
 
         auditService.recordAsync(new AuditService.AuditEntry(
@@ -336,7 +379,7 @@ public class GroupsService {
 
         // group-management-sharing-02-document-sharing.md §4.4 point 3/4: recipient is the leaving user themselves.
         notificationService.notifyAsync(
-                List.of(user.sub()), "group.member_removed", Map.of("groupId", groupId.toString(), "userSub", user.sub()));
+                List.of(user.sub()), "group.member_removed", memberPayload(group, user.sub(), user));
     }
 
     /**
@@ -361,7 +404,7 @@ public class GroupsService {
 
     @Transactional
     public void addMember(KeycloakUser user, UUID groupId, AddGroupMemberDto dto) {
-        requireGroupExists(groupId);
+        Group group = requireActiveGroup(groupId);
         requireOwner(user, groupId);
 
         if (groupMemberRepository.countByGroupId(groupId) >= MAX_MEMBERS_PER_GROUP) {
@@ -380,7 +423,7 @@ public class GroupsService {
             groupMemberRepository.save(membership);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("User is already a member of this group");
+                throw new ConflictException("Người dùng đã là thành viên của nhóm này");
             }
             throw e;
         }
@@ -391,12 +434,12 @@ public class GroupsService {
                 Map.of("userSub", dto.userSub(), "roleInGroup", dto.roleInGroup())));
 
         notificationService.notifyAsync(
-                List.of(dto.userSub()), "group.member_added", Map.of("groupId", groupId.toString(), "userSub", dto.userSub()));
+                List.of(dto.userSub()), "group.member_added", memberPayload(group, dto.userSub(), user));
     }
 
     @Transactional
     public void removeMember(KeycloakUser user, UUID groupId, String userSub) {
-        requireGroupExists(groupId);
+        Group group = requireActiveGroup(groupId);
         requireOwner(user, groupId);
 
         // group-management-sharing-01-group-lifecycle.md Task 4 (vá hành vi
@@ -405,7 +448,7 @@ public class GroupsService {
 
         int affected = groupMemberRepository.deleteByGroupIdAndUserSub(groupId, userSub);
         if (affected == 0) {
-            throw new NotFoundException("User is not a member of this group");
+            throw new NotFoundException("Người dùng không phải thành viên của nhóm này");
         }
 
         auditService.recordAsync(new AuditService.AuditEntry(
@@ -414,7 +457,7 @@ public class GroupsService {
                 Map.of("userSub", userSub)));
 
         notificationService.notifyAsync(
-                List.of(userSub), "group.member_removed", Map.of("groupId", groupId.toString(), "userSub", userSub));
+                List.of(userSub), "group.member_removed", memberPayload(group, userSub, user));
     }
 
     /**
@@ -425,8 +468,8 @@ public class GroupsService {
      */
     @Transactional
     public void shareDocument(KeycloakUser user, UUID documentId, ShareDocumentDto dto) {
-        Document document = documentScopeGuard.requireVisible(user, documentId);
-        requireGroupExists(dto.groupId());
+        Document document = documentScopeGuard.requireVisibleClean(user, documentId);
+        Group group = requireActiveGroup(dto.groupId());
 
         DocumentGroupShare share = new DocumentGroupShare();
         share.setDocumentId(document.getId());
@@ -437,7 +480,7 @@ public class GroupsService {
             documentGroupShareRepository.save(share);
         } catch (DataIntegrityViolationException e) {
             if (SqlErrors.isUniqueViolation(e)) {
-                throw new ConflictException("Document is already shared to this group");
+                throw new ConflictException("Tài liệu đã được chia sẻ vào nhóm này");
             }
             throw e;
         }
@@ -448,6 +491,10 @@ public class GroupsService {
                 user.preferredUsername(), user.sub(), "document.share", "document", documentId.toString(), "success",
                 auditRequestContext.method(), auditRequestContext.path(), 200, auditRequestContext.ip(),
                 Map.of("groupId", dto.groupId().toString())));
+
+        notificationService.notifyDocumentsSharedToGroup(
+                group.getId(), Objects.requireNonNullElse(group.getName(), ""), List.of(documentId), user.sub(),
+                Objects.requireNonNullElse(user.preferredUsername(), ""));
     }
 
     /**
@@ -461,7 +508,7 @@ public class GroupsService {
         Document document = documentScopeGuard.requireVisible(user, documentId);
         DocumentGroupShare share = documentGroupShareRepository
                 .findByDocumentIdAndGroupId(documentId, groupId)
-                .orElseThrow(() -> new NotFoundException("Document is not shared to this group"));
+                .orElseThrow(() -> new NotFoundException("Tài liệu chưa được chia sẻ vào nhóm này"));
 
         boolean isGroupOwner = groupMemberRepository
                 .findByGroupIdAndUserSub(groupId, user.sub())
@@ -474,7 +521,7 @@ public class GroupsService {
                     user.preferredUsername(), user.sub(), "document.unshare", "document", documentId.toString(),
                     "failure", auditRequestContext.method(), auditRequestContext.path(), 403,
                     auditRequestContext.ip(), Map.of("groupId", groupId.toString(), "reason", "forbidden")));
-            throw new ForbiddenException("Not allowed to unshare this document from this group");
+            throw new ForbiddenException("Bạn không có quyền gỡ chia sẻ tài liệu này khỏi nhóm");
         }
 
         documentGroupShareRepository.delete(share);
@@ -519,7 +566,7 @@ public class GroupsService {
      * shared.
      */
     public List<BulkShareResultItem> shareDocumentsBulk(KeycloakUser user, BulkShareDto dto) {
-        requireGroupExists(dto.groupId());
+        Group group = requireActiveGroup(dto.groupId());
 
         List<BulkShareResultItem> results = new ArrayList<>(dto.documentIds().size());
         List<UUID> sharedDocumentIds = new ArrayList<>();
@@ -537,7 +584,9 @@ public class GroupsService {
         }
 
         if (!sharedDocumentIds.isEmpty()) {
-            notificationService.notifyDocumentsSharedToGroup(dto.groupId(), sharedDocumentIds, user.sub());
+            notificationService.notifyDocumentsSharedToGroup(
+                    group.getId(), Objects.requireNonNullElse(group.getName(), ""), sharedDocumentIds, user.sub(),
+                    Objects.requireNonNullElse(user.preferredUsername(), ""));
         }
         return results;
     }
@@ -554,6 +603,9 @@ public class GroupsService {
             document = documentScopeGuard.requireVisible(user, documentId);
         } catch (NotFoundException e) {
             return BulkShareResultItem.rejected(documentId, "not_visible");
+        }
+        if (!DocumentScopeGuard.isClean(document)) {
+            return BulkShareResultItem.rejected(documentId, "not_clean");
         }
 
         if (documentGroupShareRepository.countByDocumentId(documentId) >= MAX_GROUPS_PER_DOCUMENT_BULK) {
@@ -602,7 +654,7 @@ public class GroupsService {
     public Page<GroupDocumentView> listGroupDocuments(KeycloakUser user, UUID groupId, Pageable pageable) {
         requireGroupExists(groupId);
         if (!groupMemberRepository.existsByGroupIdAndUserSub(groupId, user.sub())) {
-            throw new ForbiddenException("Not a member of this group");
+            throw new ForbiddenException("Bạn không phải thành viên của nhóm này");
         }
         Page<Object[]> rows = documentGroupShareRepository.findGroupDocuments(groupId, pageable);
 
@@ -627,16 +679,29 @@ public class GroupsService {
         });
     }
 
+    /**
+     * Payload of group.member_added/member_removed. groupName and
+     * actorUsername are a snapshot so the bell can say which group and who,
+     * even after the group is renamed or the user can no longer see it.
+     */
+    private static Map<String, Object> memberPayload(Group group, String userSub, KeycloakUser actor) {
+        return Map.of(
+                "groupId", group.getId().toString(),
+                "groupName", Objects.requireNonNullElse(group.getName(), ""),
+                "userSub", userSub,
+                "actorUsername", Objects.requireNonNullElse(actor.preferredUsername(), ""));
+    }
+
     private void requireGroupExists(UUID groupId) {
         if (!groupRepository.existsByIdAndDeletedAtIsNull(groupId)) {
-            throw new NotFoundException("Group not found");
+            throw new NotFoundException("Không tìm thấy nhóm");
         }
     }
 
     /** Like {@link #requireGroupExists} but returns the entity - callers that need to mutate it (update/delete). */
     private Group requireActiveGroup(UUID groupId) {
         return groupRepository.findByIdAndDeletedAtIsNull(groupId)
-                .orElseThrow(() -> new NotFoundException("Group not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy nhóm"));
     }
 
     private void requireOwner(KeycloakUser user, UUID groupId) {
@@ -645,7 +710,7 @@ public class GroupsService {
                 .map(m -> GroupRole.OWNER.equals(m.getRoleInGroup()))
                 .orElse(false);
         if (!isOwner) {
-            throw new ForbiddenException("Only the group owner can manage its membership");
+            throw new ForbiddenException("Chỉ chủ nhóm mới được quản lý thành viên");
         }
     }
 
@@ -657,13 +722,13 @@ public class GroupsService {
     private void requireNotLastOwner(UUID groupId, String userSub) {
         GroupMember member = groupMemberRepository
                 .findByGroupIdAndUserSub(groupId, userSub)
-                .orElseThrow(() -> new NotFoundException("User is not a member of this group"));
+                .orElseThrow(() -> new NotFoundException("Người dùng không phải thành viên của nhóm này"));
         if (!GroupRole.OWNER.equals(member.getRoleInGroup())) {
             return; // không phải owner, không cần kiểm tra
         }
         long ownerCount = groupMemberRepository.countByGroupIdAndRoleInGroup(groupId, GroupRole.OWNER);
         if (ownerCount <= 1) {
-            throw new ConflictException("Cannot remove the last owner of the group");
+            throw new ConflictException("Không thể gỡ chủ nhóm cuối cùng");
         }
     }
 

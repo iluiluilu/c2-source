@@ -125,7 +125,7 @@ public class SystemConfigService {
     public SystemConfigValue get(String key) {
         SystemConfigDef def = SystemConfigDefaults.get(key);
         if (def == null) {
-            throw new IllegalArgumentException("Unknown system config key: " + key);
+            throw new IllegalArgumentException("Tham số cấu hình không tồn tại: " + key);
         }
 
         // 1) Redis
@@ -290,7 +290,7 @@ public class SystemConfigService {
     private SystemConfigDef requireKnown(String key) {
         SystemConfigDef def = SystemConfigDefaults.get(key);
         if (def == null) {
-            throw new NotFoundException("Unknown system config key: " + key);
+            throw new NotFoundException("Tham số cấu hình không tồn tại: " + key);
         }
         return def;
     }

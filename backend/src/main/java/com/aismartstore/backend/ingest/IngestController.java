@@ -178,7 +178,7 @@ public class IngestController {
             @RequestParam(required = false) String displayName,
             @RequestParam(required = false) @Size(max = NoteConstraints.NOTE_MAX_LENGTH) String note) {
         if (file.isEmpty()) {
-            throw new BadRequestException("file is required");
+            throw new BadRequestException("Chưa chọn tệp");
         }
 
         IngestOutcome outcome = documentsService.ingestBatchFile(user, batchId, file, relativePath, displayName, note);
@@ -204,7 +204,7 @@ public class IngestController {
             @CurrentUser KeycloakUser user, @Valid @RequestBody NameCheckRequest request) {
         nameCheckRateLimiter.check(user.sub(), "ingest.name-check");
         if (request.folderId() == null || !warehouseService.folderExists(request.folderId())) {
-            throw new NotFoundException("Folder not found");
+            throw new NotFoundException("Không tìm thấy thư mục");
         }
         List<NameCheckRepository.Candidate> candidates = NameCheckSupport.toCandidates(request);
         boolean[] taken = nameCheckRepository.warehouseTaken(request.folderId(), candidates);

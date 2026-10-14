@@ -77,7 +77,7 @@ public class SystemConfigController {
             @CurrentUser KeycloakUser user) {
         Object toValue = valueOf(body, "toValue");
         if (toValue == null) {
-            throw new BadRequestException("Missing 'toValue'");
+            throw new BadRequestException("Thiếu giá trị 'toValue'");
         }
         String token = asToken(valueOf(body, "confirmationToken"));
         return service.rollback(key, toValue, token, user);
@@ -87,7 +87,7 @@ public class SystemConfigController {
 
     private static Object requireValue(Map<String, Object> body) {
         if (body == null || !body.containsKey("value")) {
-            throw new BadRequestException("Missing 'value'");
+            throw new BadRequestException("Thiếu giá trị 'value'");
         }
         return body.get("value");
     }

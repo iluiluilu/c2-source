@@ -8,6 +8,7 @@ import com.aismartstore.backend.digitization.review.ReviewSegmentRepository;
 import com.aismartstore.backend.digitization.review.SourceReferenceView;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
+import com.aismartstore.backend.documents.DocumentSpecifications;
 import com.aismartstore.backend.groups.BusinessDataScope;
 import com.aismartstore.backend.groups.GroupMemberRepository;
 import com.aismartstore.backend.search.dto.SearchHit;
@@ -77,6 +78,7 @@ public class SearchResultHydrator {
 
         Specification<Document> scopedAndCandidate = Specification
                 .where(BusinessDataScope.forDocuments(ctx.userSub(), groupMemberRepository))
+                .and(DocumentSpecifications.isClean())
                 .and((root, query, cb) -> root.get("id").in(candidateDocumentIds));
         Map<UUID, Document> allowedDocumentsById = documentRepository.findAll(scopedAndCandidate).stream()
                 .collect(Collectors.toMap(Document::getId, d -> d));
@@ -129,7 +131,10 @@ public class SearchResultHydrator {
                     hit.docType(),
                     hit.score(),
                     segmentHits,
-                    digitizationStatusByDocumentId.get(documentId)));
+                    digitizationStatusByDocumentId.get(documentId),
+                    document.getFolderId(),
+                    document.getUploaderUsername(),
+                    document.getCreatedAt()));
         }
         return results;
     }

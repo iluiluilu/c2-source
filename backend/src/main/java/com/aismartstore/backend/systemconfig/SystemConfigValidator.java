@@ -81,6 +81,15 @@ public final class SystemConfigValidator {
 
             case SystemConfigDefaults.BACKUP_SCHEDULE_CRON -> requireCronShape(key, v.asString());
 
+            case SystemConfigDefaults.SEMANTIC_TOP_K -> {
+                long topK = v.asLong();
+                if (topK < 1 || topK > 200) {
+                    throw new ConstraintViolationException(key + " phải nằm trong khoảng 1–200");
+                }
+            }
+
+            case SystemConfigDefaults.SEMANTIC_MIN_SCORE -> requireUnitInterval(key, v.asString());
+
             default -> {
                 // No specific single-key rule; the type conversion already
                 // guaranteed the value parses for its declared value_type.
@@ -151,6 +160,18 @@ public final class SystemConfigValidator {
     private static void requirePercent(String key, long value) {
         if (value < 0 || value > 100) {
             throw new ConstraintViolationException(key + " phải nằm trong khoảng 0–100");
+        }
+    }
+
+    private static void requireUnitInterval(String key, String value) {
+        double parsed;
+        try {
+            parsed = Double.parseDouble(value == null ? "" : value.trim());
+        } catch (NumberFormatException e) {
+            throw new ConstraintViolationException(key + " phải là số thập phân trong khoảng 0–1");
+        }
+        if (Double.isNaN(parsed) || parsed < 0.0 || parsed > 1.0) {
+            throw new ConstraintViolationException(key + " phải nằm trong khoảng 0–1");
         }
     }
 

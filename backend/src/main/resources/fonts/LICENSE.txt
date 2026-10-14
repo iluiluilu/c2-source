@@ -1,0 +1,9 @@
+Fonts bundled for report generation (export-reporting, AC-26). They are committed so generated PDFs embed
+fonts that do not depend on the host.
+
+- Liberation Serif (LiberationSerif-*.ttf): SIL Open Font License 1.1
+  (c) 2012 Red Hat, Inc. - https://github.com/liberationfonts/liberation-fonts
+  Full text: https://openfontlicense.org/open-font-license-official-text/
+- DejaVu Sans (DejaVuSans*.ttf): Bitstream Vera license + public-domain DejaVu changes; free to use, embed
+  and redistribute with software. Taken unmodified from the jasperreports-fonts artifact.
+  https://dejavu-fonts.github.io/License.html

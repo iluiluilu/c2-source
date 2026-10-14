@@ -30,14 +30,18 @@ public final class RolePermissionFixtures {
             // digitization-review-01-ocr.md V28 mục 2.
             "digitization_review.manage",
             // delete-restore-trash-01-xoa-mem-thung-rac.md V29.
-            "trash.manage");
+            "trash.manage",
+            // export-reporting V36.
+            "report.read", "report.export");
 
     public static final Set<String> LANH_DAO = Set.of(
             "document.read", "folder.read", "account.self_service", "personal.manage", "group.manage",
             "document.share", "audit.read_scoped",
             // r2-business-parity.md ADR-1 / V35__r2_business_parity.sql: 5 quyền
             // nghiệp vụ R1 cấp thêm cho R2.
-            "document.upload", "tag.manage", "note.write", "digitization_review.manage", "trash.manage");
+            "document.upload", "tag.manage", "note.write", "digitization_review.manage", "trash.manage",
+            // export-reporting V36.
+            "report.read", "report.export");
 
     public static final Set<String> QUAN_TRI = Set.of(
             "folder.read", "folder.manage", "scan_allowlist.manage", "system_config.manage", "account.read",

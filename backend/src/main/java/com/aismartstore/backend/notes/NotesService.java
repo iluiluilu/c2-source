@@ -67,7 +67,7 @@ public class NotesService {
      */
     @Transactional
     public DocumentNote createForDocument(KeycloakUser user, UUID documentId, String body) {
-        documentScopeGuard.requireVisible(user, documentId);
+        documentScopeGuard.requireVisibleClean(user, documentId);
 
         DocumentNote note = new DocumentNote();
         note.setDocumentId(documentId);
@@ -105,11 +105,11 @@ public class NotesService {
      */
     @Transactional
     public DocumentNote update(KeycloakUser user, UUID documentId, UUID noteId, UpdateNoteDto dto) {
-        documentScopeGuard.requireVisible(user, documentId);
+        documentScopeGuard.requireVisibleClean(user, documentId);
 
         DocumentNote note = noteRepository
                 .findByIdAndDocumentId(noteId, documentId)
-                .orElseThrow(() -> new NotFoundException("Note not found"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy ghi chú"));
 
         if (dto.expectedUpdatedAt() != null && !dto.expectedUpdatedAt().isEqual(note.getUpdatedAt())) {
             throw new ConflictException("Ghi chú đã được người khác sửa đổi; tải lại trước khi lưu");

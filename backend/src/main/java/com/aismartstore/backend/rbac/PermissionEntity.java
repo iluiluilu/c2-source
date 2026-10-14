@@ -22,6 +22,14 @@ public class PermissionEntity {
     @Column(nullable = false, length = 255)
     private String description;
 
+    /**
+     * SPEC-export-reporting §2.1 (AC-5): {@code false} = permission that must never be granted
+     * to QUAN_TRI (e.g. {@code report.*} - R3 cannot see business data). Enforced in
+     * {@code RbacService}; mapped here because {@code ddl-auto: validate} needs the column.
+     */
+    @Column(name = "admin_assignable", nullable = false)
+    private boolean adminAssignable = true;
+
     public String getCode() {
         return code;
     }
@@ -36,5 +44,13 @@ public class PermissionEntity {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public boolean isAdminAssignable() {
+        return adminAssignable;
+    }
+
+    public void setAdminAssignable(boolean adminAssignable) {
+        this.adminAssignable = adminAssignable;
     }
 }

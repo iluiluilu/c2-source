@@ -297,10 +297,10 @@ server, Dashboards chỉ là client).
 
 ```bash
 # build + upload image mới (bước 2), tag mới hoặc đè tag :stg
-ssh user@SERVER 'cd /opt/aismartstore-stg && docker compose up -d web backend'
+ssh user@SERVER 'cd /opt/aismartstore-stg && docker compose up -d backend backend-worker web'
 ```
 
-`docker compose up -d web backend` chỉ recreate 2 service dùng image mới,
+`docker compose up -d backend backend-worker web` chỉ recreate 3 service dùng image mới,
 không đụng tới Postgres/Keycloak/dữ liệu.
 
 Không cần tự `nginx -s reload` sau lệnh trên: `nginx/conf.d/00-common.conf`
@@ -321,3 +321,44 @@ moi) — do la thay doi config, khong phai IP container.
 - `config/seaweedfs/s3.json` là file JSON tĩnh, không đọc biến `.env` — nếu
   đổi `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` trong `.env` phải sửa cả file
   này cho khớp.
+
+## Backend nhiều instance (api x2 + worker)
+
+Cùng một image `API_IMAGE`, hai role chọn bằng `SPRING_PROFILES_ACTIVE`:
+
+| Service | Profile | Replica | Làm gì |
+|---|---|---|---|
+| `backend` | `api` | 2 (nginx round-robin qua Docker DNS) | HTTP; **không** chạy job nền, **không** consume queue |
+| `backend-worker` | `worker` | 1 | job nền (ShedLock / advisory lock) + consumer `q.embed`, `q.result`, heartbeat |
+
+- Mặc định khi KHÔNG đặt profile (vd `docker-compose.yml` ở thư mục gốc, máy dev) = all-in-one như trước.
+- Volume `upload-tmp` (mount `/data/upload-tmp`, env `UPLOAD_TEMP_DIR`) chứa tempfile chunk upload, dùng chung
+  cho `backend` và `backend-worker` (worker dọn phiên hết hạn). **`docker compose down -v` xoá volume này** và làm hỏng
+  các phiên upload đang mở (client phải upload lại). Phiên tạo trước khi chuyển sang volume (tempfile ở `/tmp`) cũng hỏng
+  một lần: trả `409 UPLOAD_SESSION_NOT_OPEN`.
+- Health: `http://<container>:3002/actuator/health/{liveness,readiness}` (management port, **không** publish ra host/nginx).
+  Kiểm từ trong container: `docker compose exec backend wget -qO- http://localhost:3002/actuator/health/readiness`.
+- Tắt êm: `stop_grace_period: 330s`, `server.shutdown=graceful`; message RabbitMQ chưa ack được trả lại queue.
+- `SEMANTIC_ENABLED` PHẢI cùng giá trị ở api và worker (đã dùng chung anchor `x-backend-env`).
+- Đổi `chunkSizeTokens`/`overlapTokens`/model embed => phải reindex lexical toàn bộ (hash `embed_text_hash` lệch thì mọi
+  ghi vector bị bỏ qua); theo dõi log `vector write skipped` / counter `semantic.vector.write.skipped`.
+
+### Theo dõi cảnh báo (chỉ log, không có kênh gửi)
+
+```bash
+docker compose logs --since 1h backend backend-worker | grep -E 'upload-tmp usage=|queue backlog|job skipped'
+docker compose exec backend-worker df -h /data/upload-tmp     # kiểm dung lượng volume (cảnh báo log khi > 80%)
+```
+
+- `upload-tmp usage=NN%` (WARN, từ job dọn upload mỗi 15 phút): volume > 80%.
+- `queue backlog queue=q.embed|q.result ...` (ERROR): hàng đợi tồn > ngưỡng, hoặc có message mà 0 consumer
+  liên tiếp > N lượt (worker chết/kẹt). Ngưỡng: `app.queue-alert.depth-threshold` (1000), `no-consumer-ticks` (3).
+- `job skipped: lock held name=...` (INFO): một instance khác đang giữ khoá job — bình thường khi có > 1 instance chạy job.
+
+### Snippet compose prod (`/srv/data/config/aismartstore/docker-compose.prod.yml`, ngoài repo)
+
+Vận hành áp dụng tay, cùng cấu trúc stg: anchor `x-backend-env`, `backend` (profile `api`, `deploy.replicas: 2`,
+`mem_limit: 3g`, `cpus: "4"`, `stop_grace_period: 330s`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=65`,
+`SEMANTIC_QUERY_CONCURRENCY=4`), `backend-worker` (profile `worker`, `mem_limit: 4g`, `cpus: "4"`), volume `upload-tmp`
+mount `/data/upload-tmp` + `UPLOAD_TEMP_DIR=/data/upload-tmp` cho cả hai, `restart: unless-stopped`, nginx thêm
+`proxy_next_upstream error timeout; proxy_next_upstream_tries 2;`.

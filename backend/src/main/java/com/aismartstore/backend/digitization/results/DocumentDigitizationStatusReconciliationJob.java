@@ -1,5 +1,6 @@
 package com.aismartstore.backend.digitization.results;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.config.DigitizationProperties;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,6 +40,7 @@ public class DocumentDigitizationStatusReconciliationJob {
     }
 
     @Scheduled(fixedDelayString = "${app.digitization.status-reconciliation-interval-ms:300000}")
+    @SchedulerLock(name = "document-status-reconciliation", lockAtMostFor = "PT15M", lockAtLeastFor = "PT10S")
     public void run() {
         int mismatches = 0;
         int page = 0;

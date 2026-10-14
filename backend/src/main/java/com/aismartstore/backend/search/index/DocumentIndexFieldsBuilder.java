@@ -3,6 +3,7 @@ package com.aismartstore.backend.search.index;
 import com.aismartstore.backend.digitization.results.ContentSegmentRepository;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
+import com.aismartstore.backend.documents.DocumentStatus;
 import com.aismartstore.backend.groups.DocumentGroupShare;
 import com.aismartstore.backend.groups.DocumentGroupShareRepository;
 import com.aismartstore.backend.notes.DocumentNoteRepository;
@@ -111,10 +112,13 @@ public class DocumentIndexFieldsBuilder {
             String displayName) {
     }
 
-    /** Empty if the document no longer exists or is soft-deleted (a stale/late event for it is simply ignored). */
+    /**
+     * Empty if the document no longer exists, is soft-deleted, or is not {@code clean} (a rejected/infected FR-12
+     * evidence row must never enter the index, even when a tag/note/share event fires for it - feedbacks S-01).
+     */
     public Optional<Fields> build(UUID documentId) {
         Document document = documentRepository.findById(documentId).orElse(null);
-        if (document == null || document.getDeletedAt() != null) {
+        if (document == null || document.getDeletedAt() != null || !DocumentStatus.CLEAN.equals(document.getStatus())) {
             return Optional.empty();
         }
 

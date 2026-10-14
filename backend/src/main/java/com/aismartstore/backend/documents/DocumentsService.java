@@ -11,6 +11,7 @@ import com.aismartstore.backend.displayname.DisplayNameValidator;
 import com.aismartstore.backend.displayname.NameCheckRepository;
 import com.aismartstore.backend.groups.BusinessDataScope;
 import com.aismartstore.backend.groups.DocumentScopeGuard;
+import com.aismartstore.backend.groups.DocumentGroupShareRepository;
 import com.aismartstore.backend.groups.GroupMemberRepository;
 import com.aismartstore.backend.ingest.UploadBatch;
 import com.aismartstore.backend.ingest.UploadBatchService;
@@ -87,6 +88,7 @@ public class DocumentsService {
     private final ApplicationEventPublisher applicationEventPublisher;
     private final OutboxEventRepository outboxEventRepository;
     private final NameCheckRepository nameCheckRepository;
+    private final DocumentGroupShareRepository documentGroupShareRepository;
 
     public DocumentsService(
             DocumentRepository documentRepository,
@@ -106,7 +108,8 @@ public class DocumentsService {
             DocumentScopeGuard documentScopeGuard,
             ApplicationEventPublisher applicationEventPublisher,
             OutboxEventRepository outboxEventRepository,
-            NameCheckRepository nameCheckRepository) {
+            NameCheckRepository nameCheckRepository,
+            DocumentGroupShareRepository documentGroupShareRepository) {
         this.documentRepository = documentRepository;
         this.uploadBatchService = uploadBatchService;
         this.warehouseCapacityService = warehouseCapacityService;
@@ -125,6 +128,7 @@ public class DocumentsService {
         this.applicationEventPublisher = applicationEventPublisher;
         this.outboxEventRepository = outboxEventRepository;
         this.nameCheckRepository = nameCheckRepository;
+        this.documentGroupShareRepository = documentGroupShareRepository;
     }
 
     public record DocumentContent(Document document, ResponseInputStream<GetObjectResponse> stream) {
@@ -149,9 +153,15 @@ public class DocumentsService {
             String uploaderUsername,
             String status,
             OffsetDateTime createdAt,
-            List<Tag> tags) {
+            List<Tag> tags,
+            // Groups of the caller this document reaches them through; empty for their own uploads.
+            List<String> sharedViaGroups) {
 
         static DocumentListItem of(Document document, List<Tag> tags) {
+            return of(document, tags, List.of());
+        }
+
+        static DocumentListItem of(Document document, List<Tag> tags, List<String> sharedViaGroups) {
             return new DocumentListItem(
                     document.getId(),
                     document.getOriginalName(),
@@ -164,7 +174,8 @@ public class DocumentsService {
                     document.getUploaderUsername(),
                     document.getStatus(),
                     document.getCreatedAt(),
-                    tags);
+                    tags,
+                    sharedViaGroups);
         }
     }
 
@@ -262,7 +273,7 @@ public class DocumentsService {
                 throw malwareDetected(verdict.signature());
             }
 
-            List<Document> duplicatesBySha = documentRepository.findBySha256AndStatus(sha256, DocumentStatus.CLEAN);
+            List<Document> duplicatesBySha = documentRepository.findBySha256AndStatusAndDeletedAtIsNull(sha256, DocumentStatus.CLEAN);
 
             // 8) save: pending row (committed) -> putObject -> clean (Quyet dinh 2 muc 0).
             String storageKey = "documents/" + UUID.randomUUID();
@@ -482,8 +493,26 @@ public class DocumentsService {
                     .add(tagsById.get(link.getTagId()));
         }
 
+        // Only documents someone else uploaded can have reached the caller through a group.
+        List<UUID> othersDocumentIds = documents.stream()
+                .filter(d -> !user.sub().equals(d.getUploaderSub()))
+                .map(Document::getId)
+                .toList();
+        Map<UUID, List<String>> sharedVia = new HashMap<>();
+        if (!othersDocumentIds.isEmpty()) {
+            List<UUID> myGroupIds = groupMemberRepository.findGroupIdsByUserSub(user.sub());
+            if (!myGroupIds.isEmpty()) {
+                for (Object[] row : documentGroupShareRepository.findSharedGroupNames(othersDocumentIds, myGroupIds)) {
+                    sharedVia.computeIfAbsent((UUID) row[0], k -> new ArrayList<>()).add((String) row[1]);
+                }
+            }
+        }
+
         return documents.stream()
-                .map(d -> DocumentListItem.of(d, tagsByDocumentId.getOrDefault(d.getId(), List.of())))
+                .map(d -> DocumentListItem.of(
+                        d,
+                        tagsByDocumentId.getOrDefault(d.getId(), List.of()),
+                        sharedVia.getOrDefault(d.getId(), List.of())))
                 .toList();
     }
 
@@ -513,7 +542,7 @@ public class DocumentsService {
     public DocumentContent getContent(KeycloakUser user, UUID id) {
         Document document = findOne(user, id);
         if (!DocumentStatus.CLEAN.equals(document.getStatus()) || document.getStorageKey() == null) {
-            throw new NotFoundException("Document not found");
+            throw new NotFoundException("Không tìm thấy tài liệu");
         }
 
         var stream = objectStorageService.getObject(document.getStorageKey());

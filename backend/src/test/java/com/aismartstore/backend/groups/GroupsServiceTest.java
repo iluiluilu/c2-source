@@ -120,6 +120,7 @@ class GroupsServiceTest {
             throw new RuntimeException(e);
         }
         document.setUploaderSub(uploaderSub);
+        document.setStatus("clean");
         return document;
     }
 
@@ -321,7 +322,7 @@ class GroupsServiceTest {
     @Test
     void shareDocumentWritesAnAclChangedOutboxEvent() {
         UUID documentId = UUID.randomUUID();
-        when(documentScopeGuard.requireVisible(owner, documentId)).thenReturn(document(documentId, owner.sub()));
+        when(documentScopeGuard.requireVisibleClean(owner, documentId)).thenReturn(document(documentId, owner.sub()));
         when(groupRepository.existsByIdAndDeletedAtIsNull(groupId)).thenReturn(true);
 
         service.shareDocument(owner, documentId, new com.aismartstore.backend.groups.dto.ShareDocumentDto(groupId));
@@ -333,6 +334,40 @@ class GroupsServiceTest {
         assertThat(captor.getValue().getPayload().get("documentId")).isEqualTo(documentId.toString());
         assertThat(captor.getValue().getPayload().get("groupId")).isEqualTo(groupId.toString());
         assertThat(captor.getValue().getPayload().get("action")).isEqualTo("shared");
+    }
+
+    @Test
+    void listViewsCarryMemberAndDocumentCountsAndMyRole() {
+        when(groupMemberRepository.findGroupIdsByUserSub(owner.sub())).thenReturn(List.of(groupId));
+        when(groupRepository.findAllByIdInAndDeletedAtIsNull(List.of(groupId))).thenReturn(List.of(activeGroup()));
+        when(groupMemberRepository.countMembersByGroupIds(List.of(groupId)))
+                .thenReturn(List.<Object[]>of(new Object[] {groupId, 3L}));
+        when(documentGroupShareRepository.countVisibleDocumentsByGroupIds(List.of(groupId)))
+                .thenReturn(List.<Object[]>of(new Object[] {groupId, 5L}));
+        GroupMember me = new GroupMember();
+        me.setGroupId(groupId);
+        me.setUserSub(owner.sub());
+        me.setRoleInGroup(GroupRole.OWNER);
+        when(groupMemberRepository.findByUserSubAndGroupIdIn(owner.sub(), List.of(groupId))).thenReturn(List.of(me));
+
+        List<GroupsService.GroupListView> views = service.listViewsForCurrentUser(owner);
+
+        assertThat(views).hasSize(1);
+        assertThat(views.get(0).name()).isEqualTo("Nhóm test");
+        assertThat(views.get(0).memberCount()).isEqualTo(3);
+        assertThat(views.get(0).documentCount()).isEqualTo(5);
+        assertThat(views.get(0).myRole()).isEqualTo(GroupRole.OWNER);
+    }
+
+    @Test
+    void shareDocumentNotifiesTheGroupWithItsName() {
+        UUID documentId = UUID.randomUUID();
+        when(documentScopeGuard.requireVisibleClean(owner, documentId)).thenReturn(document(documentId, "someone"));
+
+        service.shareDocument(owner, documentId, new com.aismartstore.backend.groups.dto.ShareDocumentDto(groupId));
+
+        verify(notificationService)
+                .notifyDocumentsSharedToGroup(groupId, "Nhóm test", List.of(documentId), owner.sub(), owner.preferredUsername());
     }
 
     @Test
@@ -450,6 +485,22 @@ class GroupsServiceTest {
     }
 
     @Test
+    void bulkShareRejectsARejectedOrInfectedDocumentAsNotClean() {
+        UUID documentId = UUID.randomUUID();
+        Document rejected = document(documentId, "someone");
+        rejected.setStatus("rejected");
+        when(groupRepository.existsByIdAndDeletedAtIsNull(groupId)).thenReturn(true);
+        when(documentScopeGuard.requireVisible(owner, documentId)).thenReturn(rejected);
+
+        List<BulkShareResultItem> results = service.shareDocumentsBulk(owner, new BulkShareDto(groupId, List.of(documentId)));
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).status()).isEqualTo("rejected");
+        assertThat(results.get(0).reason()).isEqualTo("not_clean");
+        verify(documentGroupShareRepository, never()).save(any(DocumentGroupShare.class));
+    }
+
+    @Test
     void bulkShareMarksAnAlreadySharedDocumentWithoutError() {
         UUID documentId = UUID.randomUUID();
         when(groupRepository.existsByIdAndDeletedAtIsNull(groupId)).thenReturn(true);
@@ -475,12 +526,13 @@ class GroupsServiceTest {
 
         service.shareDocumentsBulk(owner, new BulkShareDto(groupId, List.of(sharedDoc, alreadySharedDoc)));
 
-        verify(notificationService).notifyDocumentsSharedToGroup(groupId, List.of(sharedDoc), owner.sub());
+        verify(notificationService)
+                .notifyDocumentsSharedToGroup(groupId, "Nhóm test", List.of(sharedDoc), owner.sub(), owner.preferredUsername());
     }
 
     @Test
     void bulkShareOnAMissingGroupThrowsBeforeProcessingAnyItem() {
-        when(groupRepository.existsByIdAndDeletedAtIsNull(groupId)).thenReturn(false);
+        when(groupRepository.findByIdAndDeletedAtIsNull(groupId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.shareDocumentsBulk(owner, new BulkShareDto(groupId, List.of(UUID.randomUUID()))))
                 .isInstanceOf(NotFoundException.class);

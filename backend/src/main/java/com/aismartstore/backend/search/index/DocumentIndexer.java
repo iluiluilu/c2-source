@@ -104,6 +104,17 @@ public class DocumentIndexer {
         return response.updated() != null ? response.updated() : 0L;
     }
 
+    /** SPEC-search-semantic T10 ({@code folder.moved}) - same partial update but selected by an arbitrary filter (e.g. {@code folder_id}). */
+    public long updateByQuery(Query filter, String script, Map<String, JsonData> params) throws IOException {
+        var response = client.updateByQuery(u -> u
+                .index(SearchIndexNames.DOCUMENT_ALIAS)
+                .query(filter)
+                .script(s -> s.inline(is -> is.lang("painless").source(script).params(params)))
+                .refresh(true)
+                .conflicts(org.opensearch.client.opensearch._types.Conflicts.Proceed));
+        return response.updated() != null ? response.updated() : 0L;
+    }
+
     /**
      * trash-search-index-cleanup.md §4.2/§4.5 - drops every document in
      * {@code documentIds} from the index in one {@code deleteByQuery} call

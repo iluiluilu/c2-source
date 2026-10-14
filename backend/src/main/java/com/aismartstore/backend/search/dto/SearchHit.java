@@ -1,5 +1,6 @@
 package com.aismartstore.backend.search.dto;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,6 +13,8 @@ import java.util.UUID;
  *     search time (BA Story 4 AC-1), or {@code null} when that table has no
  *     row at all for this document (never had a digitization run created -
  *     not evidence that one is pending).
+ * @param folderId / uploaderUsername / createdAt where the document lives,
+ *     who ingested it and when - so a result can be judged without opening it.
  */
 public record SearchHit(
         UUID documentId,
@@ -19,5 +22,8 @@ public record SearchHit(
         String docType,
         double score,
         List<SegmentHit> segments,
-        String documentDigitizationStatus) {
+        String documentDigitizationStatus,
+        UUID folderId,
+        String uploaderUsername,
+        OffsetDateTime createdAt) {
 }

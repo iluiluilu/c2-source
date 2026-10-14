@@ -1,0 +1,9 @@
+# backend-multi-instance: role api - chi phuc vu HTTP; khong chay job nen, khong consume queue.
+app:
+  role: api
+  scheduling:
+    enabled: false
+  messaging:
+    consumers-enabled: false
+  semantic:
+    consumer-enabled: false

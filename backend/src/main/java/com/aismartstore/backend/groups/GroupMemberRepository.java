@@ -34,6 +34,13 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, GroupM
 
     boolean existsByGroupIdAndUserSub(UUID groupId, String userSub);
 
+    /** Member count per group for the group list: rows of {groupId, count}. */
+    @Query("select gm.groupId, count(gm) from GroupMember gm where gm.groupId in :groupIds group by gm.groupId")
+    List<Object[]> countMembersByGroupIds(@Param("groupIds") List<UUID> groupIds);
+
+    /** The caller's own memberships, for "my role" on the group list. */
+    List<GroupMember> findByUserSubAndGroupIdIn(String userSub, List<UUID> groupIds);
+
     /** Story 6 AC-1: current member count of a group, for the 200 members/group cap. */
     long countByGroupId(UUID groupId);
 

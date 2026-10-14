@@ -1,17 +1,43 @@
-.DS_Store
-.idea/
-node_modules/
-target/
-.next/
+# Whitelist: mặc định bỏ qua mọi thứ ở thư mục gốc, chỉ đưa vào các mục cần quản lý version.
+/*
 
-# web/ có repo git riêng
-/web/
-# thư mục tạm/cũ đưa ra ngoài
-/main-workspace/
+# --- Project code ---
+!/backend/
+!/web/
+!/tools/
 
-# cấu hình Claude theo máy
+# --- Hạ tầng / cấu hình chạy ---
+!/docker-compose.yml
+!/docker-compose.dev.yml
+!/keycloak/
+!/opensearch/
+!/postgres/
+!/seaweedfs/
+!/clamav/
+!/stg/
+!/mock-data/
+
+# --- Pipeline AI + tài liệu pipeline ---
+!/.gitignore
+!/AGENTS.md
+!/CLAUDE.md
+!/docs/
+!/.claude/
+
+# --- Ngoại lệ bên trong các mục được giữ ---
+# (negate các mục mà ~/.gitignore_global đang ignore: docs, .claude)
+!docs
+!.claude
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# file môi trường
+node_modules/
+target/
+.next/
+coverage/
+.DS_Store
+.idea/
 .env
+.env.*
+!.env.example
+stg/server.txt

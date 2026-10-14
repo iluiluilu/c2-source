@@ -204,7 +204,7 @@ public class SearchServiceImpl implements SearchService {
             }
             double score = hit.score() != null ? hit.score() : 0.0;
             hits.add(new com.aismartstore.backend.search.query.LexicalHit(
-                    UUID.fromString(source.getSegmentId()), UUID.fromString(source.getDocumentId()), score));
+                    source.getSegmentId(), UUID.fromString(source.getDocumentId()), score));
         }
         return hits;
     }
@@ -447,7 +447,7 @@ public class SearchServiceImpl implements SearchService {
     }
 
     /** §3.3 AC-13/AC-1/AC-6: per-filter max size + the 2 closed lists (docType/confirmSource). */
-    private void validateFilters(SearchFilters filters) {
+    void validateFilters(SearchFilters filters) {
         if (filters == null) {
             return;
         }

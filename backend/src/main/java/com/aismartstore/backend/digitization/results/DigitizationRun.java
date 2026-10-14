@@ -373,6 +373,17 @@ public class DigitizationRun {
         return confirmSource;
     }
 
+    /**
+     * search-fulltext-01-tim-kiem-co-ban.md §2.1: the 3 DB values normalize to the search contract's
+     * 2 values - {@code manual_unchanged}/{@code manual_edited} -> {@code manual}, anything else
+     * (incl. a missing value) -> {@code auto}, so the "tự động xác nhận" badge errs on the cautious side.
+     */
+    public static String searchConfirmSource(String dbConfirmSource) {
+        return CONFIRM_MANUAL_UNCHANGED.equals(dbConfirmSource) || CONFIRM_MANUAL_EDITED.equals(dbConfirmSource)
+                ? "manual"
+                : "auto";
+    }
+
     public void setConfirmSource(String confirmSource) {
         this.confirmSource = confirmSource;
     }

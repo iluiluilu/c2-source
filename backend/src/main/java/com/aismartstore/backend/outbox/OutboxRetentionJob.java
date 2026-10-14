@@ -1,5 +1,6 @@
 package com.aismartstore.backend.outbox;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.aismartstore.backend.systemconfig.SystemConfigDefaults;
 import com.aismartstore.backend.systemconfig.SystemConfigService;
 import java.time.OffsetDateTime;
@@ -51,6 +52,7 @@ public class OutboxRetentionJob {
      * check below it) ever executes.
      */
     @Scheduled(fixedDelayString = "${app.outbox.retention-interval-ms:86400000}")
+    @SchedulerLock(name = "outbox-retention", lockAtMostFor = "PT24H", lockAtLeastFor = "PT1M")
     @Transactional
     public void run() {
         long startedAt = System.currentTimeMillis();

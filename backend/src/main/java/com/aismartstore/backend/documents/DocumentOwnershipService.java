@@ -64,7 +64,7 @@ public class DocumentOwnershipService {
     @Transactional
     public TransferResult transfer(UUID documentId, String toUserSub, String reason, KeycloakUser actor) {
         Document document = documentRepository.findById(documentId)
-                .orElseThrow(() -> new NotFoundException("document not found: " + documentId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài liệu: " + documentId));
 
         String fromUploaderSub = document.getUploaderSub();
         if (toUserSub.equals(fromUploaderSub)) {

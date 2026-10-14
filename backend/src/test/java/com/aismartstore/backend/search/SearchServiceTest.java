@@ -225,7 +225,7 @@ class SearchServiceTest {
         when(openSearchClient.search(any(org.opensearch.client.opensearch.core.SearchRequest.class), eq(SegmentDocument.class)))
                 .thenReturn(fakeResponse(List.of(hit), 1));
 
-        SearchHit hydratedHit = new SearchHit(documentId, "Hop_dong.pdf", "hop_dong", 12.34, List.of(), "confirmed");
+        SearchHit hydratedHit = new SearchHit(documentId, "Hop_dong.pdf", "hop_dong", 12.34, List.of(), "confirmed", null, null, null);
         when(hydrator.hydrate(any(), any())).thenReturn(List.of(hydratedHit));
 
         SearchRequest request = new SearchRequest("hop dong", null, null, 0, 20);
@@ -360,7 +360,7 @@ class SearchServiceTest {
         when(openSearchClient.search(any(org.opensearch.client.opensearch.core.SearchRequest.class), eq(SegmentDocument.class)))
                 .thenThrow(new IOException("connection refused", new ConnectException("Connection refused")));
 
-        SearchHit fallbackHit = new SearchHit(UUID.randomUUID(), "tai-lieu.pdf", "văn bản", 0.0, List.of(), null);
+        SearchHit fallbackHit = new SearchHit(UUID.randomUUID(), "tai-lieu.pdf", "văn bản", 0.0, List.of(), null, null, null, null);
         SearchResponse fallbackResponse =
                 new SearchResponse(List.of(fallbackHit), 1, 0, 20, SearchResponse.DEGRADED_OPENSEARCH_UNAVAILABLE, List.of());
         when(metadataFallbackSearchService.search(any(), any(), any(), eq(0), eq(20))).thenReturn(fallbackResponse);

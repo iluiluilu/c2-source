@@ -59,6 +59,7 @@ public class UploadSessionService {
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
     private final AuditRequestContext auditRequestContext;
+    private final UploadProperties uploadProperties;
 
     public UploadSessionService(
             UploadSessionRepository uploadSessionRepository,
@@ -68,7 +69,8 @@ public class UploadSessionService {
             SystemConfigService systemConfigService,
             ObjectMapper objectMapper,
             AuditService auditService,
-            AuditRequestContext auditRequestContext) {
+            AuditRequestContext auditRequestContext,
+            UploadProperties uploadProperties) {
         this.uploadSessionRepository = uploadSessionRepository;
         this.uploadBatchService = uploadBatchService;
         this.documentsService = documentsService;
@@ -77,6 +79,7 @@ public class UploadSessionService {
         this.objectMapper = objectMapper;
         this.auditService = auditService;
         this.auditRequestContext = auditRequestContext;
+        this.uploadProperties = uploadProperties;
     }
 
     /** Result of {@link #complete} - the HTTP status/body the controller should send as-is. */
@@ -222,6 +225,7 @@ public class UploadSessionService {
         }
 
         Path path = Path.of(session.getTempFilePath());
+        requireUsableTempFile(path);
         long hardCap = session.getChunkSizeBytes() + 1;
         long written = writeBounded(path, body, hardCap);
 
@@ -309,6 +313,7 @@ public class UploadSessionService {
         UploadBatch batch = uploadBatchService.loadOpenBatch(session.getBatchId());
 
         Path tempFile = Path.of(session.getTempFilePath());
+        requireUsableTempFile(tempFile);
         boolean keepSession = false;
         try {
             if (displayNameOverride != null) {
@@ -357,7 +362,7 @@ public class UploadSessionService {
             session.setStatus(UploadSessionStatus.ABORTED);
             session.setUpdatedAt(OffsetDateTime.now());
             uploadSessionRepository.save(session);
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to complete upload session");
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Không thể hoàn tất phiên tải lên");
         } finally {
             if (!keepSession) {
                 deleteQuietly(tempFile);
@@ -515,9 +520,25 @@ public class UploadSessionService {
                 .orElseThrow(this::forbidden);
     }
 
-    private static Path createTempFile() {
+    /**
+     * backend-multi-instance Task 10 (AC-14): a session whose temp file is outside the configured temp dir
+     * (e.g. created under /tmp before the shared volume existed) or whose file is gone can never be completed.
+     * Rejects with the existing 409 {@code UPLOAD_SESSION_NOT_OPEN} and changes nothing: no state flip (the
+     * surrounding transaction would roll it back anyway) and no implicit file creation; the session is left
+     * OPEN for {@code UploadCleanupJob} to expire.
+     */
+    private void requireUsableTempFile(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        if (!normalized.startsWith(uploadProperties.resolvedTempDir()) || !Files.isRegularFile(normalized)) {
+            throw notOpen();
+        }
+    }
+
+    private Path createTempFile() {
         try {
-            return Files.createTempFile("upload-session-", ".tmp");
+            Path dir = uploadProperties.resolvedTempDir();
+            Files.createDirectories(dir);
+            return Files.createTempFile(dir, "upload-session-", ".tmp");
         } catch (IOException e) {
             throw new IllegalStateException("Failed to create a temp file for a new upload session", e);
         }
@@ -572,7 +593,7 @@ public class UploadSessionService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", "BATCH_NOT_FOUND");
         body.put("message", "Không tìm thấy lượt tải");
-        return new ApiException(HttpStatus.NOT_FOUND, body, "Batch not found");
+        return new ApiException(HttpStatus.NOT_FOUND, body, "Không tìm thấy lượt tải");
     }
 
     private static ApiException fileTooLarge(long maxFileSizeBytes) {

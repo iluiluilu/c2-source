@@ -310,6 +310,55 @@ class SearchIndexOutboxPollerTest {
     }
 
     /**
+     * search-fulltext-01-tim-kiem-co-ban.md §2.1 - confirm_source is the run's (manual_* -> manual), never
+     * inferred from whether the segment was edited: stg showed a manually confirmed, unedited OCR run
+     * indexed as "auto" and badged "Nội dung tự động xác nhận" in both /search and /search/semantic.
+     */
+    @Test
+    void reviewConfirmedIndexesTheRunsConfirmSourceNotTheSegmentsEditedFlag() throws Exception {
+        UUID documentId = UUID.randomUUID();
+        UUID manualRunId = UUID.randomUUID();
+        when(fieldsBuilder.build(documentId)).thenReturn(Optional.of(fields(documentId)));
+        when(contentSegmentRepository.findByRunIdOrderBySegmentIndex(manualRunId))
+                .thenReturn(List.of(contentSegment(manualRunId, documentId, 0, false)));
+        DigitizationRun manualRun = new DigitizationRun();
+        manualRun.setId(manualRunId);
+        manualRun.setConfirmSource(DigitizationRun.CONFIRM_MANUAL_UNCHANGED);
+        when(digitizationRunRepository.findById(manualRunId)).thenReturn(Optional.of(manualRun));
+        when(digitizationRunRepository.findByDocumentIdAndTaskAndReviewState(any(), any(), any())).thenReturn(Optional.empty());
+        when(outboxEventRepository.claimNextForIndexing(any(), anyInt())).thenReturn(Optional.of(event(43, "review.confirmed", Map.of(
+                "documentId", documentId.toString(), "runId", manualRunId.toString(), "task", "ocr"))));
+
+        poller.claimAndProcessOne();
+
+        ArgumentCaptor<List<Map<String, Object>>> segmentsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(segmentIndexer).upsertSegments(segmentsCaptor.capture(), eqLong(CONTENT_VERSION));
+        assertThat(segmentsCaptor.getValue().get(0).get("confirm_source")).isEqualTo("manual");
+    }
+
+    @Test
+    void autoConfirmedRunIsIndexedAsAuto() throws Exception {
+        UUID documentId = UUID.randomUUID();
+        UUID autoRunId = UUID.randomUUID();
+        when(fieldsBuilder.build(documentId)).thenReturn(Optional.of(fields(documentId)));
+        when(contentSegmentRepository.findByRunIdOrderBySegmentIndex(autoRunId))
+                .thenReturn(List.of(contentSegment(autoRunId, documentId, 0, false)));
+        DigitizationRun autoRun = new DigitizationRun();
+        autoRun.setId(autoRunId);
+        autoRun.setConfirmSource(DigitizationRun.CONFIRM_AUTO);
+        when(digitizationRunRepository.findById(autoRunId)).thenReturn(Optional.of(autoRun));
+        when(digitizationRunRepository.findByDocumentIdAndTaskAndReviewState(any(), any(), any())).thenReturn(Optional.empty());
+        when(outboxEventRepository.claimNextForIndexing(any(), anyInt())).thenReturn(Optional.of(event(44, "review.confirmed", Map.of(
+                "documentId", documentId.toString(), "runId", autoRunId.toString(), "task", "ocr"))));
+
+        poller.claimAndProcessOne();
+
+        ArgumentCaptor<List<Map<String, Object>>> segmentsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(segmentIndexer).upsertSegments(segmentsCaptor.capture(), eqLong(CONTENT_VERSION));
+        assertThat(segmentsCaptor.getValue().get(0).get("confirm_source")).isEqualTo("auto");
+    }
+
+    /**
      * search-fulltext-01-tim-kiem-co-ban.md §2.1 - index_version is the single
      * version contract for every write, regardless of content_source; before
      * the fix only the OCR branch happened to be exercised by the other test
@@ -498,7 +547,7 @@ class SearchIndexOutboxPollerTest {
     // ---- HANDLED_EVENT_TYPES: every event type this poller must claim, spelled out so an addition is never missed ----
 
     @Test
-    void handledEventTypesListsAllNineEventTypesThisPollerReactsTo() {
+    void handledEventTypesListsAllTenEventTypesThisPollerReactsTo() {
         assertThat(SearchIndexOutboxPoller.HANDLED_EVENT_TYPES).containsExactlyInAnyOrder(
                 "document.classification.changed",
                 "document.note.changed",
@@ -508,7 +557,9 @@ class SearchIndexOutboxPollerTest {
                 "document.acl.changed",
                 "document.trash",
                 "document.restored",
-                "document.purged");
+                "document.purged",
+                // search-semantic T10 (Q-3): the 10th - folder.moved keeps folder_path_ids in sync
+                "folder.moved");
     }
 
     // ---- retry contract: a failure increments attempts and never marks processed_at ----

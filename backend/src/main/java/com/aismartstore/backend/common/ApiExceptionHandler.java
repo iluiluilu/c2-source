@@ -87,7 +87,7 @@ public class ApiExceptionHandler {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(e -> e.getField() + ": " + e.getDefaultMessage())
-                .orElse("Validation failed");
+                .orElse("Dữ liệu không hợp lệ");
         recordBusinessFailureAudit(request, HttpStatus.BAD_REQUEST.value(), "validation_failed: " + message);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(HttpStatus.BAD_REQUEST, message));
     }
@@ -117,7 +117,7 @@ public class ApiExceptionHandler {
         String message = ex.getConstraintViolations().stream()
                 .findFirst()
                 .map(v -> lastPathNode(v) + ": " + v.getMessage())
-                .orElse("Validation failed");
+                .orElse("Dữ liệu không hợp lệ");
         recordBusinessFailureAudit(request, HttpStatus.BAD_REQUEST.value(), "validation_failed: " + message);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorBody(HttpStatus.BAD_REQUEST, message));
     }
@@ -138,13 +138,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Object> handleUnreadable(HttpMessageNotReadableException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(errorBody(HttpStatus.BAD_REQUEST, "Malformed request body"));
+                .body(errorBody(HttpStatus.BAD_REQUEST, "Dữ liệu gửi lên không đúng định dạng"));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<Object> handleMaxUpload(MaxUploadSizeExceededException ex) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(errorBody(HttpStatus.PAYLOAD_TOO_LARGE, "File exceeds the maximum upload size"));
+                .body(errorBody(HttpStatus.PAYLOAD_TOO_LARGE, "Tệp vượt quá dung lượng tải lên tối đa"));
     }
 
     /**
@@ -158,7 +158,7 @@ public class ApiExceptionHandler {
     public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex) {
         recordAccessDeniedAudit("role_mismatch");
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(errorBody(HttpStatus.FORBIDDEN, "Forbidden resource"));
+                .body(errorBody(HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện thao tác này"));
     }
 
     /**
@@ -174,7 +174,7 @@ public class ApiExceptionHandler {
                 request.getMethod(), request.getRequestURI(), ex);
         recordAccessDeniedAudit("scope_resolution_failed");
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(errorBody(HttpStatus.FORBIDDEN, "Forbidden resource"));
+                .body(errorBody(HttpStatus.FORBIDDEN, "Bạn không có quyền thực hiện thao tác này"));
     }
 
     /**

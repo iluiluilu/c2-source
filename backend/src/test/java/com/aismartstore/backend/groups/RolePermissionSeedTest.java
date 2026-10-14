@@ -118,7 +118,10 @@ class RolePermissionSeedTest {
             // phục hồi thùng rác cá nhân (R1) và thống kê thùng rác không xem nội
             // dung (R3, Story 3). r2-business-parity.md ADR-1 / V35: + LANH_DAO (R2).
             Map.entry("trash.manage", Set.of("CAN_BO", "LANH_DAO")),
-            Map.entry("trash.stats.read", Set.of("QUAN_TRI")));
+            Map.entry("trash.stats.read", Set.of("QUAN_TRI")),
+            // V36 export-reporting: R3 never gets report.* (admin_assignable=false, AC-5)
+            Map.entry("report.read", Set.of("CAN_BO", "LANH_DAO")),
+            Map.entry("report.export", Set.of("CAN_BO", "LANH_DAO")));
 
     /**
      * rbac-permission-editing.md Task 8: a fresh migration (V12 seed + V15's

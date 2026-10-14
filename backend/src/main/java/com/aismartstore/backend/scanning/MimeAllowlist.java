@@ -142,13 +142,13 @@ public final class MimeAllowlist {
     public static FormatCheck checkFormat(File file, String originalName, String mimeType) {
         List<String> extensions = ALLOWED.get(mimeType);
         if (extensions == null) {
-            return FormatCheck.reject("File type '" + mimeType + "' is not accepted");
+            return FormatCheck.reject("Định dạng tệp không được phép nạp vào kho (" + mimeType + ")");
         }
 
         String extension = extractExtension(originalName);
         if (!extensions.contains(extension)) {
             return FormatCheck.reject(
-                    "Extension '." + extension + "' does not match declared type '" + mimeType + "'");
+                    "Đuôi tệp '." + extension + "' không khớp với định dạng khai báo (" + mimeType + ")");
         }
 
         List<Magic> signatures = MAGIC.get(mimeType);
@@ -157,7 +157,8 @@ public final class MimeAllowlist {
             boolean matched = signatures.stream().anyMatch(m -> matches(header, m));
             if (!matched) {
                 return FormatCheck.reject(
-                        "File content does not match declared type '" + mimeType + "'");
+                        "Nội dung tệp không khớp với định dạng khai báo (." + extension
+                        + "). Tệp có thể đã bị đổi đuôi nên bị từ chối.");
             }
         }
 

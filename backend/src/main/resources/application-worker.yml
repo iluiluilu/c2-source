@@ -1,0 +1,9 @@
+# backend-multi-instance: role worker - chay job nen + consumer (van mo HTTP de healthcheck/endpoint noi bo).
+app:
+  role: worker
+  scheduling:
+    enabled: true
+  messaging:
+    consumers-enabled: true
+  semantic:
+    consumer-enabled: true

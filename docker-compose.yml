@@ -136,20 +136,6 @@ services:
       timeout: 10s
       retries: 10
 
-  # Vector database for FR-24 semantic search (ai-search-infra / search-semantic).
-  qdrant:
-    image: qdrant/qdrant:v1.12.4
-    ports:
-      - 6333:6333  # REST API
-      - 6334:6334  # gRPC API
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' 2>/dev/null"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
   # Message broker for FR-17/19/20 digitization pipeline (ai-search-infra).
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -189,6 +175,7 @@ services:
       S3_BUCKET: documents
       S3_PERSONAL_BUCKET: personal
       S3_AUDIT_ARCHIVE_BUCKET: audit-archive
+      S3_REPORTS_BUCKET: reports
       S3_REGION: us-east-1
       CLAMD_HOST: clamav
       CLAMD_PORT: "3310"
@@ -202,9 +189,11 @@ services:
       # RABBITMQ_HOST/RABBITMQ_PORT below.
       OPENSEARCH_HOST: opensearch
       OPENSEARCH_PORT: "9200"
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: "6334"
-      QDRANT_URL: http://qdrant:6333
+      # search-semantic T1/T2: vectors live in OpenSearch (k-NN); embeddings come from this REST endpoint
+      # (Qwen3-Embedding-0.6B). dev: public domain only - stg/prod must point to the internal service (NFR-04).
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL:-https://embedding.aitutor.io.vn/ai/services/v1/embedding/embed}
+      # Rollout flag (search-semantic.md §9): gates /search/semantic AND embed.requested producer/consumer.
+      SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
       RABBITMQ_URL: amqp://aismartstore:aismartstore@rabbitmq:5672/
       # digitization-pipeline-01-source-dispatch.md Task 0: spring.rabbitmq.*
       # (application.yml) reads these discrete vars, not RABBITMQ_URL above -
@@ -225,8 +214,6 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
-      qdrant:
-        condition: service_started
       rabbitmq:
         condition: service_healthy
 
@@ -257,5 +244,4 @@ volumes:
   seaweedfs_data:
   clamav_data:
   opensearch_data:
-  qdrant_data:
   rabbitmq_data:

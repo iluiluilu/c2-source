@@ -158,7 +158,7 @@ public class AccountsService {
     public AccountRow create(KeycloakUser user, CreateAccountDto dto) {
         for (String role : dto.roles()) {
             if (!AssignableRoles.ALL.contains(role)) {
-                throw new BadRequestException("Unknown role: " + role);
+                throw new BadRequestException("Vai trò không hợp lệ: " + role);
             }
         }
 
@@ -268,7 +268,7 @@ public class AccountsService {
             if (dto.roles() != null) {
                 for (String role : dto.roles()) {
                     if (!AssignableRoles.ALL.contains(role)) {
-                        throw new BadRequestException("Unknown role: " + role);
+                        throw new BadRequestException("Vai trò không hợp lệ: " + role);
                     }
                 }
                 Set<String> desired = new HashSet<>(dto.roles());

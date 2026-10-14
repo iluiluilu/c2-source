@@ -61,7 +61,7 @@ public class UploadBatchService {
     @Transactional
     public UploadBatch open(KeycloakUser user, UUID targetFolderId, int declaredFileCount, long declaredTotalBytes) {
         if (!warehouseService.folderExists(targetFolderId)) {
-            throw new NotFoundException("Folder not found");
+            throw new NotFoundException("Không tìm thấy thư mục");
         }
 
         Limits limits = getLimits();
@@ -202,6 +202,6 @@ public class UploadBatchService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", "BATCH_NOT_FOUND");
         body.put("message", "Không tìm thấy lượt tải");
-        return new ApiException(HttpStatus.NOT_FOUND, body, "Batch not found");
+        return new ApiException(HttpStatus.NOT_FOUND, body, "Không tìm thấy lượt tải");
     }
 }

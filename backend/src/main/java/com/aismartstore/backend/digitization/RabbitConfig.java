@@ -167,6 +167,45 @@ public class RabbitConfig {
                 .with(queueProperties.videoName() + ".dlq");
     }
 
+    // ---- q.embed (search-semantic T6, SPEC-search-semantic indexing §9) ------
+    // Parameters MUST match the queues created by hand on stg (2026-09-15): main = durable +
+    // x-max-priority=9 + DLX ai.jobs.dlx / key q.embed.dlq; retry = durable + DLX ai.jobs / key q.embed
+    // (no TTL); dlq = durable, no arguments. A mismatch means 406 PRECONDITION_FAILED at startup.
+
+    @Bean
+    public Queue embedQueue() {
+        return mainQueue(queueProperties.embedName());
+    }
+
+    @Bean
+    public Binding embedBinding() {
+        return BindingBuilder.bind(embedQueue()).to(aiJobsExchange()).with(queueProperties.embedName());
+    }
+
+    @Bean
+    public Queue embedRetryQueue() {
+        return retryQueue(queueProperties.embedName());
+    }
+
+    @Bean
+    public Binding embedRetryBinding() {
+        return BindingBuilder.bind(embedRetryQueue())
+                .to(aiJobsExchange())
+                .with(queueProperties.embedName() + ".retry");
+    }
+
+    @Bean
+    public Queue embedDlq() {
+        return dlq(queueProperties.embedName());
+    }
+
+    @Bean
+    public Binding embedDlqBinding() {
+        return BindingBuilder.bind(embedDlq())
+                .to(aiJobsDeadLetterExchange())
+                .with(queueProperties.embedName() + ".dlq");
+    }
+
     // ---- q.heartbeat / q.result (Pha 2) --------------------------------
 
     @Bean

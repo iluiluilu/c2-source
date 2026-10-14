@@ -3,9 +3,11 @@ package com.aismartstore.backend.groups;
 import com.aismartstore.backend.audit.AuditRequestContext;
 import com.aismartstore.backend.audit.AuditService;
 import com.aismartstore.backend.auth.KeycloakUser;
+import com.aismartstore.backend.common.ConflictException;
 import com.aismartstore.backend.common.NotFoundException;
 import com.aismartstore.backend.documents.Document;
 import com.aismartstore.backend.documents.DocumentRepository;
+import com.aismartstore.backend.documents.DocumentStatus;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.jpa.domain.Specification;
@@ -70,7 +72,27 @@ public class DocumentScopeGuard {
                                     404,
                                     auditRequestContext.ip(),
                                     Map.of("reason", "out_of_scope"))));
-                    throw new NotFoundException("Document not found");
+                    throw new NotFoundException("Không tìm thấy tài liệu");
                 });
     }
+
+    /**
+     * {@link #requireVisible} plus "the document is {@code clean}": tagging, noting and sharing a rejected/infected
+     * FR-12 evidence row is refused with 409 (feedbacks D-08/S-01) - those writes would otherwise push it into the
+     * search index and into group members' view. Removing a tag/note/share stays allowed (plain {@code requireVisible}).
+     */
+    public Document requireVisibleClean(KeycloakUser user, UUID documentId) {
+        Document document = requireVisible(user, documentId);
+        if (!isClean(document)) {
+            throw new ConflictException(NOT_CLEAN_MESSAGE);
+        }
+        return document;
+    }
+
+    public static boolean isClean(Document document) {
+        return DocumentStatus.CLEAN.equals(document.getStatus());
+    }
+
+    public static final String NOT_CLEAN_MESSAGE =
+            "Tài liệu bị từ chối hoặc nhiễm mã độc, không thể gán nhãn, ghi chú hay chia sẻ.";
 }

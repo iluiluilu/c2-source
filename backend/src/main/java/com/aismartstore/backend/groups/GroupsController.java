@@ -63,8 +63,8 @@ public class GroupsController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('PERM_group.manage')")
-    public List<Group> list(@CurrentUser KeycloakUser user) {
-        return groupsService.listForCurrentUser(user);
+    public List<GroupsService.GroupListView> list(@CurrentUser KeycloakUser user) {
+        return groupsService.listViewsForCurrentUser(user);
     }
 
     @GetMapping("/{id}/members")
